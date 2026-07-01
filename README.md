@@ -1,3 +1,20 @@
 # Engineering Impact Dashboard (initial draft)
 
 Ranks the contributors of a real open-source repository by **impact rather than activity** — the degree to which an engineer's work is depended on, trusted, and hard to replace — explicitly rejecting raw commit count and lines-of-code as the headline signal. The approach derives four independent, percentile-normalized signals from git history and GitHub reviews — **ownership concentration** (surviving-blame share of the files you're the major owner of), **code survival** (durability of your contributions, tenure-normalized), **co-change coupling criticality** (PageRank centrality of the files you own in the commit co-change graph), and **review leverage** (reviews given, weighted by distinct authors reviewed for) — and combines them with equal weights into a single, one-sentence-explainable score. A Streamlit dashboard presents an ordered leaderboard grouped into uncertainty tiers (so small-sample ranks aren't overclaimed), per-contributor drill-downs showing the evidence behind each score, and a persistent "signals, not verdicts" caveat layer that is honest about bus-factor risk, what the metrics can't see, and how they can be gamed.
+
+## How it works
+
+The full signal definitions, data contract, and scoring are documented in
+[docs/methodology.md](docs/methodology.md).
+
+## Running
+
+This repo is the analysis tool; it scans an external target repository. Point it at a local clone
+and run the pipeline:
+
+```
+pip install -r requirements.txt
+REPO_PATH=/path/to/target-repo make all
+```
+
+Outputs are written to `data/`; the dashboard reads `data/scored.parquet`.

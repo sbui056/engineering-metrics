@@ -1,0 +1,9 @@
+pandas>=2.0
+pyarrow>=14.0
+requests>=2.31
+networkx>=3.2
+streamlit>=1.30
+rapidfuzz>=3.6
+tqdm>=4.66
+python-dotenv>=1.0
+pytest>=8.0
