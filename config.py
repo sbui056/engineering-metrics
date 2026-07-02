@@ -35,6 +35,15 @@ def get_github_token() -> str | None:
     return os.environ.get("GITHUB_TOKEN")
 
 
+def get_bot_extra() -> list[str]:
+    """Extra bot/automation match patterns from the BOT_EXTRA env var (comma-separated).
+
+    Lets a target repo's specific automation/co-author accounts be filtered without
+    baking them into source (e.g. set in a local, untracked .env).
+    """
+    return [p.strip() for p in os.environ.get("BOT_EXTRA", "").split(",") if p.strip()]
+
+
 def ensure_dirs() -> None:
     """Create the tool's output/cache directories if they don't exist yet."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
