@@ -7,3 +7,4 @@ rapidfuzz>=3.6
 tqdm>=4.66
 python-dotenv>=1.0
 pytest>=8.0
+altair>=5.0

@@ -15,6 +15,12 @@ and run the pipeline:
 ```
 pip install -r requirements.txt
 REPO_PATH=/path/to/target-repo make all
+streamlit run dashboard.py
 ```
 
 Outputs are written to `data/`; the dashboard reads `data/scored.parquet`.
+
+The reviews step calls the GitHub API. It authenticates with `GITHUB_TOKEN` (environment or a
+local `.env`), falling back to the `gh` CLI's stored credential; with no token it degrades to a
+partial fetch and the pipeline marks the review signal as imputed rather than failing. API
+responses are cached under `.cache/` so reruns only refetch PRs that changed.

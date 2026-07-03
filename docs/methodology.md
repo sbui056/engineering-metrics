@@ -74,7 +74,11 @@ filtered. Generated and vendored paths (lockfiles, `dist/`, `build/`, `vendor/`,
 are excluded. Merge commits are detected by parent count, measured against the first parent only,
 flagged, and excluded from churn, ownership, and coupling. `Co-authored-by` trailers are credited,
 with a commit's additions and deletions split equally among the committer and each co-author.
-Binary files (numstat `-`) map to 0.
+Binary files (numstat `-`) map to 0. Renames are chained across history: every historical path is
+rewritten to its HEAD-era name (following multi-hop renames newest-first), so a repository
+restructure does not fragment the co-change graph or break the join between file centrality and
+blame ownership. On FastVideo this chaining recovers the large `v1/` flattening; without it nearly
+half the centrality mass pointed at dead paths.
 
 **Ownership and survival.** `git blame -w -M -C -C` at HEAD attributes each surviving line, ignoring
 whitespace and following moves and copies. A major owner of a file holds at least 5% ownership above
@@ -88,6 +92,14 @@ and clamped to [0, 1].
 touching *n* files contributes an inverse-size weight of `1/(n-1)`, and commits touching more than
 a fixed number of files are dropped. Edges are pruned to pairs whose co-change lift exceeds 1 with a
 minimum support of 2. File criticality is PageRank on the resulting weighted graph.
+
+**Reviews.** Every PR and its submitted reviews are fetched from the GitHub API. Each reviewer
+login is bridged to a git identity — first via the commits API (the login's most recent commit
+email), then via noreply-login and profile-name lookups — and canonicalized through the shared
+resolver, so reviewers land in the same author space as commits. Bot reviewers, reviews on
+bot-authored PRs, and self-reviews (same login or same canonical identity) are excluded. Draft
+(pending) reviews do not count. If the fetch is cut short, whatever was gathered is written with
+`status="partial"` rather than failing the pipeline.
 
 ## Scoring
 
@@ -103,10 +115,21 @@ impact_score = 0.25 * pct(ownership_concentration)
 
 `coupling_criticality` is owned-criticality, computed in the merge step by joining file centrality to
 per-file blame share on `file_path`, multiplying, and summing per author. `review_leverage` is
-`distinct_authors_reviewed * log1p(review_count)`. An engineer with no review data has that signal
-imputed to the median (50th percentile) and flagged, so a data gap does not read as a worst-case
-score. Contributors are grouped into tiers so that ranks separated by less than a meaningful margin
-are not presented as distinct.
+`distinct_authors_reviewed * log1p(review_count)`.
+
+Missing signals impute to the median, never to zero, so a data-availability gap cannot masquerade
+as "worst." The direction of the inference depends on coverage: when the review fetch is complete,
+an engineer absent from the review table genuinely gave zero reviews — a true zero, scored as such —
+whereas under a partial fetch, absence is unknowable and is median-imputed and badged
+(`review_data_imputed`). Engineers whose additions all fall inside the survival recency window have
+no survival basis yet and are likewise median-imputed. Pure reviewers with no commits are excluded
+from the leaderboard (three of four signals would be pure imputation) and reported in the merge
+step's output.
+
+Contributors are grouped into tiers so that ranks separated by less than a meaningful margin are
+not presented as distinct: a new tier starts when the drop to the previous contributor exceeds an
+epsilon of half the median adjacent-score gap, so exact and near ties share a tier. Within-tier
+order is not meaningful.
 
 ## Limitations
 
