@@ -31,8 +31,22 @@ def get_repo_path(cli_value: str | None = None) -> Path:
 
 
 def get_github_token() -> str | None:
-    """GitHub token for the reviews track; None if unset (Track B degrades to partial)."""
-    return os.environ.get("GITHUB_TOKEN")
+    """GitHub token for the reviews track; None if unavailable (Track B degrades to partial).
+
+    Order: GITHUB_TOKEN env (or .env), then the gh CLI's stored credential.
+    """
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        return token
+    try:
+        import subprocess
+
+        out = subprocess.run(
+            ["gh", "auth", "token"], capture_output=True, text=True, timeout=10
+        )
+        return out.stdout.strip() or None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
 
 
 def get_bot_extra() -> list[str]:

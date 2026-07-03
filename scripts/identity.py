@@ -234,6 +234,15 @@ class IdentityResolver:
                 self._flags[label].add("name==login merge")
         return self
 
+    def lookup_login(self, login: str | None) -> str | None:
+        """Canonical label for a GitHub login seen in a noreply email, else None."""
+        return self._by_login.get((login or "").strip().lower()) or None
+
+    def lookup_name(self, name: str | None) -> str | None:
+        """Canonical label for an exact (normalized) git author name, else None."""
+        n = normalize_name(name)
+        return self._by_name.get(n) if n else None
+
     def canonical(self, name: str | None, email: str | None) -> str:
         """Resolve a (name, email) to its canonical label; deterministic fallback if unseen."""
         nk = (normalize_name(name), normalize_email(email))
