@@ -19,13 +19,9 @@ import streamlit as st
 import config
 
 # Validated reference palette (dataviz skill): blue = the one sequential hue,
-# neutral inks for text/grid; status colors are reserved for status only.
+# secondary ink for direct labels; status colors are reserved for status only.
 BLUE = "#2a78d6"
-BLUE_LIGHT = "#86b6ef"
-INK = "#0b0b0b"
 INK_SECONDARY = "#52514e"
-INK_MUTED = "#898781"
-GRID = "#e1e0d9"
 
 SIGNAL_LABELS = {
     "ownership_concentration": "Ownership concentration",
@@ -56,13 +52,6 @@ def flags_text(row: pd.Series) -> str:
     if row["review_data_imputed"]:
         flags.append("◌ no review data")
     return "  ".join(flags)
-
-
-def base_chart(df: pd.DataFrame) -> alt.Chart:
-    return alt.Chart(df).configure_view(strokeOpacity=0).configure_axis(
-        gridColor=GRID, domainColor="#c3c2b7", tickColor="#c3c2b7",
-        labelColor=INK_MUTED, titleColor=INK_SECONDARY,
-    )
 
 
 def signal_bars(row: pd.Series) -> alt.Chart:
