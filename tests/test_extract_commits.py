@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from extract_commits import (  # noqa: E402
-    is_bot, is_excluded, parse_coauthors, rename_target, split_int,
+    chain_renames, is_bot, is_excluded, parse_coauthors, rename_target, split_int,
 )
 
 
@@ -34,6 +34,17 @@ def test_is_bot():
     assert is_bot("github-actions", "github-actions[bot]@users.noreply.github.com")
     assert is_bot("GitHub", "noreply@github.com".replace("noreply", "web-flow"))
     assert not is_bot("William Lin", "wlsaidhi@gmail.com")
+
+
+def test_chain_renames_follows_multi_hop():
+    # Newest first: b.py -> c.py happened after a.py -> b.py, so a.py chains to c.py.
+    pairs = [("b.py", "c.py"), ("a.py", "b.py")]
+    m = chain_renames(pairs)
+    assert m == {"b.py": "c.py", "a.py": "c.py"}
+    # A rename cycle collapses to a harmless no-op for the round-tripped path.
+    m = chain_renames([("b.py", "a.py"), ("a.py", "b.py")])
+    assert m == {"b.py": "a.py"}
+    assert chain_renames([]) == {}
 
 
 def test_parse_coauthors():

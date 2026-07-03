@@ -79,6 +79,43 @@ def parse_coauthors(body: str) -> list[tuple[str, str]]:
     return [(m.group(1), m.group(2)) for m in _COAUTHOR_RE.finditer(body)]
 
 
+def chain_renames(pairs) -> dict[str, str]:
+    """Map old paths to final names from (old, new) rename pairs, newest first.
+
+    Because pairs arrive newest-first, when an older rename old->new is seen,
+    new's own final name (if it was renamed again later) is already resolved.
+    Name reuse across time can mis-chain in rare cases — the same ambiguity
+    `git log --follow` has — which is acceptable at repo scale.
+    """
+    mapping: dict[str, str] = {}
+    for old, new in pairs:
+        if old != new:
+            mapping[old] = mapping.get(new, new)
+    return {k: v for k, v in mapping.items() if k != v}
+
+
+def build_rename_map(repo: Path) -> dict[str, str]:
+    """Chain every historical rename so old paths resolve to their HEAD-era name.
+
+    Without this, commits that predate a rename keep the old path and the
+    co-change graph / ownership joins fragment across restructures (the -M flag
+    only normalizes the rename entry itself, not earlier history).
+    """
+    out = subprocess.run(
+        ["git", "-C", str(repo), "log", "-M", "--diff-merges=first-parent",
+         "--name-status", "--format="],
+        capture_output=True, text=True, errors="replace", check=True,
+    ).stdout
+
+    def pairs():
+        for line in out.splitlines():
+            cols = line.split("\t")
+            if len(cols) == 3 and cols[0].startswith("R"):
+                yield cols[1], cols[2]
+
+    return chain_renames(pairs())
+
+
 def run_git_log(repo: Path) -> str:
     fmt = f"{RS}%H{US}%aI{US}%an{US}%ae{US}%P{US}%B{US}"
     return subprocess.run(
@@ -90,6 +127,7 @@ def run_git_log(repo: Path) -> str:
 
 def extract(repo: Path):
     resolver = build_from_repo(repo)
+    rename_map = build_rename_map(repo)
     raw = run_git_log(repo)
 
     rows = []
@@ -138,6 +176,7 @@ def extract(repo: Path):
                 continue
             a, d, path = cols
             path = rename_target(path)
+            path = rename_map.get(path, path)  # chain to the HEAD-era name
             if is_excluded(path):
                 continue
             adds = 0 if a == "-" else int(a)
@@ -168,6 +207,7 @@ def extract(repo: Path):
     df["date"] = pd.to_datetime(df["date"], utc=True)
     df = df.astype({"additions": "int64", "deletions": "int64", "is_merge": "bool"})
     stats = {
+        "renamed_paths_chained": len(rename_map),
         "total_commits": total_commits,
         "bot_commits_filtered": bot_commits,
         "merge_commits": merge_commits,
@@ -194,6 +234,7 @@ def main() -> None:
     print(f"  bot commits filtered:      {stats['bot_commits_filtered']:,}")
     print(f"  raw author identities:     {stats['raw_author_identities']:,}")
     print(f"  canonical authors:         {stats['canonical_authors']:,}")
+    print(f"  renamed paths chained:     {stats['renamed_paths_chained']:,}")
 
 
 if __name__ == "__main__":
