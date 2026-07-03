@@ -42,6 +42,16 @@ import config  # noqa: E402
 from extract_commits import is_bot, is_excluded, rename_target  # noqa: E402
 from identity import build_from_repo  # noqa: E402
 
+OWNERSHIP_FILE_COLUMNS = [
+    "file_path", "author_canonical", "blame_lines", "blame_share",
+    "is_blame_leader", "is_major_owner", "top_owner_proportion",
+    "minor_contributor_count", "is_orphan_risk",
+]
+OWNERSHIP_AUTHOR_COLUMNS = [
+    "author_canonical", "ownership_concentration",
+    "code_survival_tenure_normalized", "bus_factor_flag",
+]
+
 MIN_FILE_LINES = 5        # files smaller than this are floored out
 MAJOR_SHARE = 0.05        # ownership share to qualify as a major contributor
 MAJOR_MIN_COMMITS = 2     # absolute floor: commits to the file ...
@@ -60,15 +70,26 @@ def list_tracked_files(repo: Path) -> list[str]:
 
 
 def is_binary_or_tiny(repo: Path, path: str) -> bool:
-    """Cheap sniff: binary (null byte in first 8KB) or fewer than MIN_FILE_LINES lines."""
-    f = repo / path
+    """Cheap sniff: binary (null byte in first 8KB) or fewer than MIN_FILE_LINES lines.
+
+    Single pass: sniff the head, count newlines from the same handle, and stop
+    reading as soon as the line floor is cleared.
+    """
     try:
-        with open(f, "rb") as fh:
+        with open(repo / path, "rb") as fh:
             head = fh.read(8192)
-        if b"\0" in head:
-            return True
-        with open(f, "rb") as fh:
-            lines = sum(1 for _ in fh)
+            if b"\0" in head:
+                return True
+            lines = head.count(b"\n")
+            last = head
+            while lines < MIN_FILE_LINES:
+                chunk = fh.read(65536)
+                if not chunk:
+                    if last and not last.endswith(b"\n"):
+                        lines += 1  # final unterminated line still counts
+                    break
+                lines += chunk.count(b"\n")
+                last = chunk
         return lines < MIN_FILE_LINES
     except OSError:
         return True
@@ -143,7 +164,7 @@ def added_lines_by_single_author(repo: Path) -> pd.DataFrame:
             adds += 0 if a == "-" else int(a)
         if adds:
             rows.append({"name": name, "email": email, "date": date_s, "additions": adds})
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows, columns=["name", "email", "date", "additions"])
     df["date"] = pd.to_datetime(df["date"], utc=True, format="ISO8601")
     return df
 
@@ -178,11 +199,7 @@ def build_file_table(per_file_counts: dict, commits_to_file: dict) -> pd.DataFra
                 "minor_contributor_count": minor_count,
                 "is_orphan_risk": orphan,
             })
-    return pd.DataFrame(rows, columns=[
-        "file_path", "author_canonical", "blame_lines", "blame_share",
-        "is_blame_leader", "is_major_owner", "top_owner_proportion",
-        "minor_contributor_count", "is_orphan_risk",
-    ])
+    return pd.DataFrame(rows, columns=OWNERSHIP_FILE_COLUMNS)
 
 
 def build_author_table(
@@ -228,10 +245,7 @@ def build_author_table(
             "code_survival_tenure_normalized": survival,
             "bus_factor_flag": bool(bus.get(a, False)),
         })
-    return pd.DataFrame(rows, columns=[
-        "author_canonical", "ownership_concentration",
-        "code_survival_tenure_normalized", "bus_factor_flag",
-    ])
+    return pd.DataFrame(rows, columns=OWNERSHIP_AUTHOR_COLUMNS)
 
 
 def main() -> None:

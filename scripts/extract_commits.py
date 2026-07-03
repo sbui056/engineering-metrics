@@ -40,6 +40,11 @@ LOCKFILES = {
 }
 _COAUTHOR_RE = re.compile(r"^\s*Co-authored-by:\s*(.*?)\s*<([^>]+)>\s*$", re.I | re.M)
 
+COMMITS_COLUMNS = [
+    "commit_hash", "author_canonical", "author_email_raw", "date",
+    "file_path", "additions", "deletions", "is_merge",
+]
+
 
 def is_bot(name: str, email: str) -> bool:
     blob = f"{name} {email}".lower()
@@ -176,6 +181,12 @@ def extract(repo: Path):
                 continue
             a, d, path = cols
             path = rename_target(path)
+            # Exclude on the commit-time name BEFORE chaining, and on the
+            # HEAD-era name after: a file that was ever under an excluded
+            # location stays excluded, and chaining can never retroactively
+            # pull vendored history into scope.
+            if is_excluded(path):
+                continue
             path = rename_map.get(path, path)  # chain to the HEAD-era name
             if is_excluded(path):
                 continue
@@ -200,10 +211,7 @@ def extract(repo: Path):
                     "is_merge": is_merge,
                 })
 
-    df = pd.DataFrame(rows, columns=[
-        "commit_hash", "author_canonical", "author_email_raw", "date",
-        "file_path", "additions", "deletions", "is_merge",
-    ])
+    df = pd.DataFrame(rows, columns=COMMITS_COLUMNS)
     df["date"] = pd.to_datetime(df["date"], utc=True)
     df = df.astype({"additions": "int64", "deletions": "int64", "is_merge": "bool"})
     stats = {

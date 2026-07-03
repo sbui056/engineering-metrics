@@ -7,7 +7,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from compute_ownership import (  # noqa: E402
-    HALF_LIFE_YEARS, RECENT_DAYS, build_author_table, build_file_table, parse_porcelain,
+    HALF_LIFE_YEARS, MIN_FILE_LINES, RECENT_DAYS, added_lines_by_single_author,
+    build_author_table, build_file_table, is_binary_or_tiny, parse_porcelain,
 )
 
 NOW = pd.Timestamp("2026-07-01", tz="UTC")
@@ -122,3 +123,29 @@ def test_bus_factor_flag():
     tbl = _author_table(counts, c2f, {}, []).set_index("author_canonical")
     assert tbl.loc["Alice", "bus_factor_flag"]      # sole major owner of a.py
     assert not tbl.loc["Bob", "bus_factor_flag"]    # b.py has two major owners
+
+
+def test_added_lines_empty_history_does_not_crash(monkeypatch):
+    # Degenerate target repo (bot-only / fully excluded): the frame must come
+    # back empty with the schema intact, not KeyError('date').
+    class FakeResult:
+        stdout = ""
+
+    monkeypatch.setattr("compute_ownership.subprocess.run", lambda *a, **k: FakeResult())
+    df = added_lines_by_single_author(Path("/nonexistent"))
+    assert df.empty
+    assert list(df.columns) == ["name", "email", "date", "additions"]
+
+
+def test_is_binary_or_tiny_single_pass(tmp_path):
+    (tmp_path / "binary.bin").write_bytes(b"abc\0def")
+    (tmp_path / "four.txt").write_bytes(b"a\nb\nc\nd\n")
+    (tmp_path / "five_unterminated.txt").write_bytes(b"a\nb\nc\nd\ne")
+    (tmp_path / "big.txt").write_bytes(b"x" * 9000 + b"\n" + b"y\n" * MIN_FILE_LINES)
+    (tmp_path / "empty.txt").write_bytes(b"")
+    assert is_binary_or_tiny(tmp_path, "binary.bin")
+    assert is_binary_or_tiny(tmp_path, "four.txt")
+    assert not is_binary_or_tiny(tmp_path, "five_unterminated.txt")
+    assert not is_binary_or_tiny(tmp_path, "big.txt")     # lines beyond the 8KB head
+    assert is_binary_or_tiny(tmp_path, "empty.txt")
+    assert is_binary_or_tiny(tmp_path, "missing.txt")     # OSError -> excluded

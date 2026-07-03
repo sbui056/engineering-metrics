@@ -24,6 +24,8 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config  # noqa: E402
 
+COUPLING_COLUMNS = ["file_path", "centrality_score", "weighted_degree"]
+
 MAX_COMMIT_FILES = 20   # commits touching more than this many files are dropped
 MIN_SUPPORT = 2         # a pair must co-change in at least this many commits
 MIN_LIFT = 1.0          # and more often than chance
@@ -102,7 +104,7 @@ def score_files(edges: dict, all_files: set) -> pd.DataFrame:
         }
         for f in sorted(all_files)
     ]
-    return pd.DataFrame(rows, columns=["file_path", "centrality_score", "weighted_degree"])
+    return pd.DataFrame(rows, columns=COUPLING_COLUMNS)
 
 
 def main() -> None:
