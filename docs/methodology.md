@@ -119,8 +119,11 @@ per-file blame share on `file_path`, multiplying, and summing per author. `revie
 
 Missing signals impute to the median, never to zero, so a data-availability gap cannot masquerade
 as "worst." The direction of the inference depends on coverage: when the review fetch is complete,
-an engineer absent from the review table genuinely gave zero reviews — a true zero, scored as such —
-whereas under a partial fetch, absence is unknowable and is median-imputed and badged
+an engineer absent from the review table genuinely gave zero reviews — a true zero, which ranks at
+the tie-averaged midrank of the zero block, below every observed reviewer but not at the floor
+(when most contributors gave zero reviews, that midrank sits near the middle of the distribution,
+so the practical difference from median imputation is modest; the merge step prints where the zero
+block landed) — whereas under a partial fetch, absence is unknowable and is median-imputed and badged
 (`review_data_imputed`). Engineers whose additions all fall inside the survival recency window have
 no survival basis yet and are likewise median-imputed. Pure reviewers with no commits are excluded
 from the leaderboard (three of four signals would be pure imputation) and reported in the merge

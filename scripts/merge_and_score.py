@@ -18,9 +18,12 @@ review_leverage = distinct_authors_reviewed * log1p(review_count).
 
 Missing-signal policy (median, never zero, so a data gap can't read as "worst"):
   - reviews: if the fetch was complete, an author absent from reviews.parquet
-    genuinely gave zero reviews — that's a true zero, scored as such, and
-    has_review_data stays true (coverage exists). Only when the fetch was
-    partial (or the table is empty) does absence become unknowable:
+    genuinely gave zero reviews — a true zero, ranked at the zero-block
+    midrank (tie-averaged percentile), below every observed reviewer but not
+    at the floor; when most authors gave zero reviews this lands near the
+    middle, so the practical gap to the partial-fetch imputation below is
+    modest — and has_review_data stays true (coverage exists). Only when the
+    fetch was partial (or the table is empty) does absence become unknowable:
     has_review_data=false, review_leverage imputed to the 50th percentile,
     review_data_imputed=true.
   - survival: authors whose additions are all inside the recency window have
@@ -179,6 +182,13 @@ def build_scored(
     review_pct = pct_rank(df["review_leverage_raw"])
     df["review_data_imputed"] = review_pct.isna()
     df["review_leverage"] = review_pct.fillna(0.5)
+    # True zeros rank at the zero-block midrank, not the floor — surface where
+    # that lands so the complete-vs-partial distinction stays honest.
+    zero_mask = review_complete & (df["review_leverage_raw"] == 0.0)
+    n_zero_reviews = int(zero_mask.sum()) if review_complete else 0
+    zero_review_pct = (
+        float(df.loc[zero_mask, "review_leverage"].iloc[0]) if n_zero_reviews else None
+    )
 
     df["impact_score"] = 0.25 * (
         df["ownership_concentration"]
@@ -206,6 +216,8 @@ def build_scored(
     diag = {
         "n_authors": len(df),
         "review_complete": review_complete,
+        "zero_review_authors": n_zero_reviews,
+        "zero_review_pct": zero_review_pct,
         "n_review_imputed": int(df["review_data_imputed"].sum()),
         "n_survival_imputed": n_survival_imputed,
         "coupling_files_unmatched": len(active_files - blamed_files),
@@ -237,6 +249,9 @@ def main() -> None:
           f"({diag['n_review_imputed']} authors median-imputed)")
     print(f"  survival median-imputed:   {diag['n_survival_imputed']} authors "
           f"(all additions too recent)")
+    if diag["zero_review_authors"]:
+        print(f"  true-zero reviewers:       {diag['zero_review_authors']} authors "
+              f"at zero-block midrank percentile {diag['zero_review_pct']:.3f}")
     print(f"  coupling files with centrality but no blame rows: "
           f"{diag['coupling_files_unmatched']} / {diag['coupling_files_active']}")
     if diag["pure_reviewers_excluded"]:
