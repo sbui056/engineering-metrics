@@ -6,12 +6,15 @@ mass sums to ~1, the scoring identity holds, imputation flags are coherent,
 and the scored universe matches the commit authors. Prints one PASS/FAIL line
 per check and exits nonzero if anything failed — wire into `make validate`.
 
+Schemas and filter rules are IMPORTED from their producers (single source of
+truth), so this harness tests the real predicates rather than a copy that can
+silently drift.
+
 Usage: python scripts/validate.py
 """
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -20,37 +23,20 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config  # noqa: E402
+from compute_coupling import COUPLING_COLUMNS  # noqa: E402
+from compute_ownership import OWNERSHIP_AUTHOR_COLUMNS, OWNERSHIP_FILE_COLUMNS  # noqa: E402
+from extract_commits import COMMITS_COLUMNS, is_bot, is_excluded  # noqa: E402
+from fetch_reviews import REVIEWS_COLUMNS  # noqa: E402
+from merge_and_score import SCORED_COLUMNS  # noqa: E402
 
 SCHEMAS = {
-    "commits_clean": [
-        "commit_hash", "author_canonical", "author_email_raw", "date",
-        "file_path", "additions", "deletions", "is_merge",
-    ],
-    "reviews": [
-        "author_canonical", "reviewer_login", "review_count",
-        "distinct_authors_reviewed", "approval_rate", "status",
-    ],
-    "coupling": ["file_path", "centrality_score", "weighted_degree"],
-    "ownership_file": [
-        "file_path", "author_canonical", "blame_lines", "blame_share",
-        "is_blame_leader", "is_major_owner", "top_owner_proportion",
-        "minor_contributor_count", "is_orphan_risk",
-    ],
-    "ownership_author": [
-        "author_canonical", "ownership_concentration",
-        "code_survival_tenure_normalized", "bus_factor_flag",
-    ],
-    "scored": [
-        "author_canonical", "impact_score", "ownership_concentration",
-        "code_survival_tenure_normalized", "coupling_criticality",
-        "review_leverage", "has_review_data", "review_data_imputed",
-        "bus_factor_flag", "tier", "breadth_files", "breadth_dirs",
-        "recency_days", "consistency", "one_line_rationale",
-    ],
+    "commits_clean": COMMITS_COLUMNS,
+    "reviews": REVIEWS_COLUMNS,
+    "coupling": COUPLING_COLUMNS,
+    "ownership_file": OWNERSHIP_FILE_COLUMNS,
+    "ownership_author": OWNERSHIP_AUTHOR_COLUMNS,
+    "scored": SCORED_COLUMNS,
 }
-
-BOT_MARKERS = ("[bot]", "dependabot", "renovate", "github-actions")
-EXCLUDED_MARKERS = ("node_modules/", "/dist/", "/build/", "vendor/", ".lock")
 
 
 class Checker:
@@ -91,12 +77,14 @@ def run_checks(t: dict[str, pd.DataFrame]) -> Checker:
     c.check("dates are UTC datetimes", str(commits["date"].dtype) == "datetime64[ns, UTC]")
     c.check("additions/deletions are non-negative ints",
             bool((commits["additions"] >= 0).all() and (commits["deletions"] >= 0).all()))
-    blob = (commits["author_canonical"] + " " + commits["author_email_raw"]).str.lower()
-    n_bots = int(blob.str.contains("|".join(map(re.escape, BOT_MARKERS))).sum())
-    c.check("no bot authors slipped through", n_bots == 0, f"{n_bots} rows")
-    n_excl = int(commits["file_path"].str.contains("|".join(
-        map(re.escape, EXCLUDED_MARKERS))).sum())
-    c.check("no excluded/vendored paths", n_excl == 0, f"{n_excl} rows")
+    # Test the producers' real predicates on the distinct values, not a copy
+    # of the rules that could drift from extract_commits.
+    identities = commits[["author_canonical", "author_email_raw"]].drop_duplicates()
+    n_bots = int(sum(is_bot(n, e) for n, e in identities.itertuples(index=False)))
+    c.check("no bot authors slipped through (is_bot)", n_bots == 0, f"{n_bots} identities")
+    paths = commits["file_path"].drop_duplicates()
+    n_excl = int(sum(is_excluded(p) for p in paths))
+    c.check("no excluded/vendored paths (is_excluded)", n_excl == 0, f"{n_excl} paths")
 
     print("ownership_file:")
     share_sums = own_f.groupby("file_path")["blame_share"].sum()
