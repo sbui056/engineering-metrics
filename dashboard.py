@@ -18,8 +18,8 @@ import streamlit as st
 
 import config
 
-# Validated reference palette (dataviz skill): blue = the one sequential hue,
-# secondary ink for direct labels; status colors are reserved for status only.
+# Validated reference palette: blue = the one sequential hue, secondary ink
+# for direct labels; status colors are reserved for status only.
 BLUE = "#2a78d6"
 INK_SECONDARY = "#52514e"
 

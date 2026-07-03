@@ -1,4 +1,5 @@
-"""Validation harness: check every data/ table against the contract in CLAUDE.md.
+"""Validation harness: check every data/ table against the data contract
+(docs/methodology.md).
 
 Runs schema checks (exact column names, in order) and cross-file invariants:
 blame shares sum to 1 per file, exactly one blame leader per file, PageRank
