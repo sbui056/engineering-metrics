@@ -243,8 +243,8 @@ class IdentityResolver:
         n = normalize_name(name)
         return self._by_name.get(n) if n else None
 
-    def canonical(self, name: str | None, email: str | None) -> str:
-        """Resolve a (name, email) to its canonical label; deterministic fallback if unseen."""
+    def lookup(self, name: str | None, email: str | None) -> str | None:
+        """Resolve to a KNOWN canonical label, or None — never fabricates."""
         nk = (normalize_name(name), normalize_email(email))
         if nk in self._label:
             return self._label[nk]
@@ -255,10 +255,15 @@ class IdentityResolver:
         if nemail and nemail in self._by_email:
             return self._by_email[nemail]
         nname = normalize_name(name)
-        if nname and nname in self._by_name:
-            return self._by_name[nname]
+        return self._by_name.get(nname) if nname else None
+
+    def canonical(self, name: str | None, email: str | None) -> str:
+        """Resolve a (name, email) to its canonical label; deterministic fallback if unseen."""
+        known = self.lookup(name, email)
+        if known:
+            return known
         # Unseen identity: stable fallback (display name, else email).
-        return (name or "").strip() or nemail
+        return (name or "").strip() or normalize_email(email)
 
     def to_frame(self):
         import pandas as pd

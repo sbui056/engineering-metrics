@@ -69,18 +69,22 @@ class GitHubClient:
         while True:
             resp = self.session.get(url, params=params, timeout=30)
             self.request_count += 1
-            if (
-                resp.status_code in (403, 429)
-                and resp.headers.get("X-RateLimit-Remaining") == "0"
-            ):
-                reset = int(resp.headers.get("X-RateLimit-Reset", "0"))
-                wait = max(0.0, reset - time.time()) + 2
-                if wait > self.max_wait_s:
-                    raise RateLimitExceeded(
-                        f"rate limit exhausted; resets in {wait:.0f}s"
-                    )
-                time.sleep(wait)
-                continue
+            if resp.status_code in (403, 429):
+                wait = None
+                if resp.headers.get("X-RateLimit-Remaining") == "0":
+                    reset = int(resp.headers.get("X-RateLimit-Reset", "0"))
+                    wait = max(0.0, reset - time.time()) + 2
+                elif "Retry-After" in resp.headers:
+                    # Secondary/abuse limit: Remaining is nonzero but GitHub
+                    # still asks for a pause — honor it instead of aborting.
+                    wait = float(resp.headers["Retry-After"]) + 1
+                if wait is not None:
+                    if wait > self.max_wait_s:
+                        raise RateLimitExceeded(
+                            f"rate limit exhausted; resets in {wait:.0f}s"
+                        )
+                    time.sleep(wait)
+                    continue
             resp.raise_for_status()
             return resp
 
@@ -150,7 +154,8 @@ def bridge_logins(
     if cache_file.exists():
         bridge = json.loads(cache_file.read_text())
     todo = sorted(l for l in logins if l not in bridge)
-    for login in tqdm(todo, desc="bridging logins", unit="login", disable=not todo):
+    for i, login in enumerate(tqdm(todo, desc="bridging logins", unit="login",
+                                   disable=not todo)):
         ident: list[str] | None = None
         try:
             commits = client.get(
@@ -168,6 +173,9 @@ def bridge_logins(
         except requests.HTTPError:
             ident = None  # e.g. 404/422 for odd accounts; fall through to login-only
         bridge[login] = ident
+        if i % 20 == 19:  # checkpoint so an aborted run keeps most of its work
+            cache_file.write_text(json.dumps(bridge))
+    if todo:
         cache_file.write_text(json.dumps(bridge))
     return bridge
 
@@ -178,7 +186,9 @@ def make_login_resolver(resolver: IdentityResolver, bridge: dict[str, list[str] 
     def resolve(login: str) -> str:
         ident = bridge.get(login)
         if ident and ident[1]:  # bridged to a real git email: strongest signal
-            return resolver.canonical(ident[0], ident[1])
+            c = resolver.lookup(ident[0], ident[1])
+            if c:  # only when it lands on a KNOWN author — a stray email the
+                return c  # clone never saw must not shadow the login match below
         c = resolver.lookup_login(login)  # committed via a noreply email
         if c:
             return c
@@ -186,6 +196,8 @@ def make_login_resolver(resolver: IdentityResolver, bridge: dict[str, list[str] 
             c = resolver.lookup_name(ident[0])
             if c:
                 return c
+        if ident and ident[1]:  # unseen everywhere: stable human-readable label
+            return resolver.canonical(ident[0], ident[1])
         return login  # never committed: the login is its own identity
 
     return resolve

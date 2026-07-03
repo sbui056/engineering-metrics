@@ -84,13 +84,44 @@ def test_login_resolver_bridge_then_fallbacks():
         "some-login": ["Alice Smith", "alice@example.com"],  # commits-API bridge
         "bobby": ["Bob Jones", ""],                          # profile-name only
         "stranger": None,                                    # nothing known
+        # Bridged to an email the clone never saw: the noreply-login match must
+        # still win over a fabricated singleton label.
+        "alicehub": ["A. Smith", "stray@fork.example"],
+        # Unseen everywhere but bridged: stable human-readable label.
+        "outsider": ["Cody Yu", "cody@external.example"],
     }
     resolve = make_login_resolver(resolver, bridge)
     assert resolve("some-login") == "Alice Smith"     # via bridged git email
-    assert resolve("alicehub") == "Alice Smith"       # via noreply login
+    assert resolve("alicehub") == "Alice Smith"       # stray email doesn't shadow login
     assert resolve("bobby") == "Bob Jones"            # via profile display name
     assert resolve("stranger") == "stranger"          # stays its own identity
+    assert resolve("outsider") == "Cody Yu"           # fabricated but readable
     assert resolve("never-seen") == "never-seen"
+
+
+def test_secondary_rate_limit_honors_retry_after(monkeypatch):
+    from fetch_reviews import GitHubClient
+
+    class FakeResponse:
+        def __init__(self, status, headers=None):
+            self.status_code = status
+            self.headers = headers or {}
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise AssertionError("raise_for_status called on limited response")
+
+    responses = [
+        FakeResponse(403, {"Retry-After": "3", "X-RateLimit-Remaining": "42"}),
+        FakeResponse(200),
+    ]
+    slept = []
+    client = GitHubClient(token=None)
+    client.session = type("S", (), {"get": lambda self, *a, **k: responses.pop(0)})()
+    monkeypatch.setattr("fetch_reviews.time.sleep", slept.append)
+    resp = client.get("https://api.example/x")
+    assert resp.status_code == 200
+    assert slept == [4.0]  # Retry-After + 1, not an abort to status=partial
 
 
 def test_github_url_regex():
