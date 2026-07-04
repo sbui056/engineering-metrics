@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Engineering Impact — FastVideo</title>
+<style>
+<!--@INJECT:CSS-->
+</style>
+</head>
+<body>
+
+<nav class="nav" aria-label="Sections">
+  <div class="nav-inner">
+    <a class="wordmark" href="#top">impact<span class="wordmark-sep">/</span>fastvideo</a>
+    <div class="nav-links">
+      <a href="#field">Contributor field</a>
+      <a href="#leaderboard">Leaderboard</a>
+      <a href="#method">Method</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <p class="eyebrow" id="hero-eyebrow"><!--@INJECT:EYEBROW--></p>
+  <h1>Who does the codebase<br> depend on?</h1>
+  <p class="hero-sub">Impact is the degree to which an engineer's work is
+    <strong>depended on, trusted, and hard to replace</strong> — measured from what
+    survived, what it's coupled to, and who trusts whom to review. Not from
+    commit counts.</p>
+  <p class="formula" aria-label="Scoring formula">impact&nbsp;=&nbsp;0.25·pct(<span>ownership</span>)&nbsp;+&nbsp;0.25·pct(<span>survival</span>)&nbsp;+&nbsp;0.25·pct(<span>coupling</span>)&nbsp;+&nbsp;0.25·pct(<span>reviews</span>)</p>
+
+  <figure class="field" id="field"
+          aria-label="Every contributor as a dot; switch views to reposition them">
+    <div class="field-controls">
+      <div id="field-views" class="seg" role="radiogroup" aria-label="Field view"></div>
+      <div id="field-signal" class="seg seg-sub" role="radiogroup" aria-label="Signal" hidden></div>
+      <div class="field-filters" id="field-filters"></div>
+      <span class="field-count" id="field-count"></span>
+    </div>
+    <div class="field-card"><div id="field-svg"></div></div>
+    <figcaption class="field-caption">
+      <p data-view="spectrum">Every contributor, placed by impact score; stacked
+        dots are ties. The clusters are why ranks come in tiers —
+        <span class="nowrap">hover to inspect, click to jump.</span></p>
+      <p data-view="activity" hidden>Commit count (log scale) against the impact
+        score. Raw commit count and lines-of-code are <strong>rejected
+        baselines</strong> — shown only as a contrast, never scored. If activity
+        were a good proxy this would be a straight line; the labeled outliers
+        are why it isn't.</p>
+      <p data-view="signals" hidden>One signal at a time, each contributor placed
+        by their percentile within this repo. Switch signals and watch the field
+        reshuffle — the reshuffling is why no single signal is the score.</p>
+      <p data-view="tiers" hidden>Contributors gathered into rank tiers: scores
+        within an indistinguishable epsilon share a column, and within-tier
+        order is not meaningful. The tall column is the true-zero review block.</p>
+    </figcaption>
+  </figure>
+
+  <div class="tiles" id="stat-tiles"></div>
+</header>
+
+<main>
+<section class="section" id="leaderboard" aria-labelledby="leaderboard-h">
+  <h2 id="leaderboard-h">Leaderboard</h2>
+  <p class="section-sub">Signals, not verdicts. Contributors within an
+    indistinguishable score epsilon share a tier — within-tier order is not meaningful.
+    <span class="badge badge-warn" role="img" aria-label="bus-factor flag">⚠ bus-factor</span>
+    marks the sole major owner of at least one file: the same concentration that makes
+    someone hard to replace is an orphan risk, so it is scored positively <em>and</em> flagged.</p>
+
+  <div class="table-tools">
+    <input id="search" type="search" placeholder="Filter contributors ( / )"
+           aria-label="Filter contributors by name">
+    <span class="table-tools-note" id="row-count"></span>
+  </div>
+
+  <div class="table-wrap">
+    <table class="board" id="board">
+      <thead>
+        <tr>
+          <th scope="col" class="num" data-sort="rank" aria-sort="ascending"><button>#</button></th>
+          <th scope="col" data-sort="name"><button>Contributor</button></th>
+          <th scope="col" class="w-impact" data-sort="impact"><button>Impact</button></th>
+          <th scope="col" class="w-sig" data-sort="ownership_concentration"><button>Own</button></th>
+          <th scope="col" class="w-sig" data-sort="code_survival_tenure_normalized"><button>Surv</button></th>
+          <th scope="col" class="w-sig" data-sort="coupling_criticality"><button>Coup</button></th>
+          <th scope="col" class="w-sig" data-sort="review_leverage"><button>Rev</button></th>
+          <th scope="col" class="w-flags">Flags</th>
+        </tr>
+      </thead>
+      <tbody id="board-body"></tbody>
+    </table>
+  </div>
+  <p class="footnote">Columns are percentiles within this repository. Expand a row for
+    the evidence: owned files, review reach, and the shown-not-scored context
+    (breadth, recency, consistency) that is deliberately kept out of the headline score.</p>
+</section>
+
+<section class="section section-method" id="method" aria-labelledby="method-h">
+  <h2 id="method-h">Method &amp; caveats</h2>
+  <!-- Curated short form. Long-form source of truth: docs/methodology.md -->
+  <div class="method-grid">
+    <div class="method-col">
+      <h3>The four signals</h3>
+      <dl class="method-list">
+        <dt>Ownership concentration</dt>
+        <dd>Size-weighted blame-share over files where the author is a major owner
+          (≥5% ownership plus an absolute floor).</dd>
+        <dt>Code survival</dt>
+        <dd>Surviving lines vs. lines added, tenure-normalized; recent additions are
+          excluded as too young to judge.</dd>
+        <dt>Coupling criticality</dt>
+        <dd>PageRank centrality of files in the co-change graph, weighted by the
+          author's blame share — the criticality of what they <em>own</em>, not what
+          they touched.</dd>
+        <dt>Review leverage</dt>
+        <dd>Distinct authors reviewed × log(1 + reviews given). Reach, not depth.</dd>
+      </dl>
+      <h3>Scoring</h3>
+      <p>Each signal is percentile-normalized over this repo's contributors and
+        combined with equal weights. Equal weights are a deliberate, transparent
+        choice, not a calibrated one — with no ground truth at this sample size,
+        unit weights are hard to beat (Dawes&nbsp;1979). Missing review data is
+        imputed to the median, never to zero, so a data gap can't masquerade as
+        "worst"; imputed rows carry a <span class="badge badge-mut">◌ no review data</span>
+        badge.</p>
+    </div>
+    <div class="method-col">
+      <h3>Limits — read before quoting a number</h3>
+      <ul class="method-list plain">
+        <li>Blame only sees lines that survived to HEAD: it favors code that hasn't
+          been rewritten and undercounts foundational-but-refactored work.</li>
+        <li>Coupling has a cold-start blind spot — a load-bearing but stable file
+          scores low — and can reward entanglement, which is sometimes a design smell.</li>
+        <li>Ownership concentration is dual-use: "hard to replace" <em>and</em>
+          "bus-factor risk". Scored positively, always flagged, never silently rewarded.</li>
+        <li>Owned-criticality and ownership both scale with blame share, so ownership
+          carries more than its nominal 25% — the four signals are really ~three
+          independent dimensions. A conscious trade-off.</li>
+        <li>Review leverage measures reach, not depth: a one-line LGTM counts like a
+          substantive review.</li>
+        <li>Every signal is a gameable proxy (Goodhart): publishing this formula as a
+          target would erode it — territorial hoarding, split PRs, rubber stamps.</li>
+        <li>Not measured at all: mentoring, design, incident response, unblocking
+          others, and any off-repo work.</li>
+        <li>Raw commit count and lines-of-code remain rejected baselines, shown above
+          only as a contrast, never scored.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="footer">
+  <p id="footer-meta"><!--@INJECT:FOOTER--></p>
+  <p>Signals, not verdicts, over a fixed data window.</p>
+</footer>
+
+<div id="tooltip" class="tooltip" role="status" aria-live="polite" hidden></div>
+
+<script>window.__DATA__ = <!--@INJECT:DATA-->;</script>
+<script>
+<!--@INJECT:JS-->
+</script>
+</body>
+</html>

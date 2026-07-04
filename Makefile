@@ -2,7 +2,7 @@ PYTHON ?= python
 REPO_PATH ?= target-repo/FastVideo
 DATA := data
 
-.PHONY: setup commits reviews coupling ownership score narrate validate all clean
+.PHONY: setup commits reviews coupling ownership score narrate validate site all clean
 
 setup:
 	$(PYTHON) -m pip install -r requirements.txt
@@ -40,7 +40,11 @@ narrate: score
 validate:
 	$(PYTHON) scripts/validate.py
 
-all: narrate validate
+# --- Static site (after narrate: it fills one_line_rationale in place) --------
+site: narrate
+	$(PYTHON) scripts/build_site.py
+
+all: narrate validate site
 
 clean:
-	rm -f $(DATA)/*.parquet
+	rm -f $(DATA)/*.parquet dist/index.html

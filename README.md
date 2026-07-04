@@ -22,6 +22,13 @@ streamlit run dashboard.py
 
 Outputs are written to `data/`; the dashboard reads `data/scored.parquet`.
 
+### Static site
+
+`make site` builds a self-contained, dependency-free version of the dashboard at
+`dist/index.html` — all data, styles, and scripts inlined, no external requests — which can
+be opened directly in a browser (or served with `python -m http.server -d dist`) and hosted
+anywhere as a single file. The Streamlit app remains the interactive dev/analysis view.
+
 The reviews step calls the GitHub API. It authenticates with `GITHUB_TOKEN` (environment or a
 local `.env`), falling back to the `gh` CLI's stored credential; with no token it degrades to a
 partial fetch and the pipeline marks the review signal as imputed rather than failing. API
