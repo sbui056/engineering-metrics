@@ -14,7 +14,9 @@ from __future__ import annotations
 import html
 import json
 import sys
+from collections import Counter
 from datetime import datetime, timezone
+from itertools import combinations
 from pathlib import Path
 
 import numpy as np
@@ -208,6 +210,69 @@ def scatter_labels(scored: pd.DataFrame, counts: pd.Series, n: int = SCATTER_LAB
     return label_set["author_canonical"].tolist()
 
 
+def cochange_arc_svg(
+    commits: pd.DataFrame,
+    top_n: int = 40,
+    width: int = 1200,
+    height: int = 560,
+    max_commit_files: int = 20,
+) -> str:
+    """Arc diagram of the strongest co-change pairs — the page's background
+    ornament. The reference site decorates with fake orbit lines; ours are the
+    repo's actual dependency structure. Colors come from CSS (currentColor).
+
+    Same conventions as compute_coupling: non-merge commits only, commits
+    touching more than max_commit_files dropped as bulk changes.
+    """
+    df = commits[~commits["is_merge"]]
+    pair_counts: Counter = Counter()
+    for files in df.groupby("commit_hash")["file_path"].unique():
+        if len(files) < 2 or len(files) > max_commit_files:
+            continue
+        pair_counts.update(combinations(sorted(files), 2))
+    top = pair_counts.most_common(top_n)
+    if not top:
+        return "<g></g>"
+
+    # order the involved files by how often they appear in the top pairs, so
+    # heavy hubs spread across the width instead of clustering by name
+    file_weight: Counter = Counter()
+    for (a, b), c in top:
+        file_weight[a] += c
+        file_weight[b] += c
+    ordered = [f for f, _ in file_weight.most_common()]
+    # interleave: heaviest in the middle, alternating outward — long arcs for
+    # hub pairs, short arcs at the edges, like a guilloche
+    slots: list[str] = [""] * len(ordered)
+    mid = len(ordered) // 2
+    for i, f in enumerate(ordered):
+        offset = (i + 1) // 2 * (1 if i % 2 else -1)
+        slots[(mid + offset) % len(ordered)] = f
+    margin = 40
+    xs = {
+        f: margin + i * (width - 2 * margin) / max(len(slots) - 1, 1)
+        for i, f in enumerate(slots)
+    }
+
+    paths = []
+    for (a, b), _ in top:
+        x1, x2 = sorted((xs[a], xs[b]))
+        r = (x2 - x1) / 2
+        if r < 8:
+            continue
+        paths.append(
+            f'<path d="M{x1:.0f} {height} A {r:.0f} {r:.0f} 0 0 1 {x2:.0f} {height}"/>'
+        )
+    dots = "".join(
+        f'<circle cx="{xs[f]:.0f}" cy="{height}" r="2.5"/>' for f in slots[:: max(len(slots) // 12, 1)]
+    )
+    return (
+        f'<g fill="none" stroke="currentColor" stroke-opacity="0.06" stroke-width="1">'
+        f'{"".join(paths)}</g>'
+        f'<g fill="currentColor" fill-opacity="0.12">{dots}</g>'
+    )
+
+
 def build_payload(frames: dict[str, pd.DataFrame]) -> dict:
     scored = frames["scored"]
     commits = frames["commits_clean"]
@@ -347,6 +412,9 @@ def build_payload(frames: dict[str, pd.DataFrame]) -> dict:
             ],
         },
         "tiers": tiers,
+        # background ornament markup, injected into the template rather than
+        # shipped as data — render_html pops it before JSON serialization
+        "_arcs": cochange_arc_svg(commits),
     }
 
 
@@ -355,6 +423,7 @@ def render_html(payload: dict) -> str:
     css = (SITE_SRC / "styles.css").read_text(encoding="utf-8")
     js = (SITE_SRC / "app.js").read_text(encoding="utf-8")
 
+    arcs = payload.pop("_arcs", "<g></g>")
     # </ would close the inline <script> if a path or rationale ever contained it.
     data = json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
 
@@ -378,6 +447,7 @@ def render_html(payload: dict) -> str:
         ("<!--@INJECT:DATA-->", data),
         ("<!--@INJECT:EYEBROW-->", eyebrow),
         ("<!--@INJECT:FOOTER-->", footer),
+        ("<!--@INJECT:ARCS-->", arcs),
     ]:
         if marker not in out:
             sys.exit(f"template.html is missing marker {marker}")

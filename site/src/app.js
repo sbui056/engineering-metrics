@@ -5,6 +5,9 @@
 (function () {
   "use strict";
 
+  // arms the reveal/motion CSS; without JS the page renders fully visible
+  document.documentElement.classList.add("js");
+
   var D = window.__DATA__;
   var SIGNALS = D.signals;
   var AUTHORS = D.authors; // sorted by rank; index === rank - 1
@@ -12,6 +15,15 @@
   AUTHORS.forEach(function (a) { byName[a.name] = a; });
 
   var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // fixed signal colors (validated categorical set — see styles.css tokens);
+  // identity is carried consistently: formula, minibars, detail bars, icons
+  var SIG_COLORS = {
+    ownership_concentration: "#D64A22",
+    code_survival_tenure_normalized: "#2E8B61",
+    coupling_criticality: "#3563C9",
+    review_leverage: "#A34981"
+  };
 
   function el(tag, className, text) {
     var n = document.createElement(tag);
@@ -44,28 +56,45 @@
   }
   function tipHide() { tip.classList.remove("show"); tip.hidden = true; }
 
-  /* --------------------------------------------------------- stat tiles */
+  /* ------------------------------------------------------- stat cells */
   (function tiles() {
     var host = document.getElementById("stat-tiles");
     var items = [
-      { label: "Contributors scored", value: String(D.meta.n_authors),
+      { label: "Contributors scored", value: String(D.meta.n_authors), count: D.meta.n_authors,
         sub: "Every non-bot author with commits in the window." },
-      { label: "Data window", value: D.meta.window_label, small: true,
-        sub: D.meta.n_commits.toLocaleString("en-US") + " non-merge commits, fixed window." },
+      { label: "Non-merge commits", value: D.meta.n_commits.toLocaleString("en-US"),
+        count: D.meta.n_commits, sub: "Fixed window: " + D.meta.window_label + "." },
       { label: "Review data", value: D.meta.review_status, small: true,
         sub: D.meta.review_status === "complete"
           ? "Fetch complete: absence of reviews is a true zero."
           : "Partial fetch: missing reviewers are median-imputed and badged." },
-      { label: "Rank tiers", value: String(D.meta.n_tiers),
+      { label: "Rank tiers", value: String(D.meta.n_tiers), count: D.meta.n_tiers,
         sub: "Same tier = indistinguishable scores; within-tier order is not meaningful." }
     ];
-    items.forEach(function (it) {
+    items.forEach(function (it, i) {
       var t = el("div", "tile");
+      t.setAttribute("data-reveal", "");
+      t.style.setProperty("--d", i * 60 + "ms");
+      var v = el("div", "tile-value" + (it.small ? " small" : ""), it.value);
+      if (it.count !== undefined) {
+        v.dataset.count = String(it.count);
+        v.dataset.text = it.value;
+      }
+      t.appendChild(v);
       t.appendChild(el("div", "tile-label", it.label));
-      t.appendChild(el("div", "tile-value" + (it.small ? " small" : ""), it.value));
       t.appendChild(el("div", "tile-sub", it.sub));
       host.appendChild(t);
     });
+  })();
+
+  /* ------------------------------------------------- card header stat */
+  (function fieldStat() {
+    var host = document.getElementById("field-stat");
+    if (!host || !AUTHORS.length) return;
+    var v = el("div", "v", AUTHORS[0].impact.toFixed(3));
+    var s = el("small", null, "top score · tier 1 of " + D.meta.n_tiers);
+    host.appendChild(v);
+    host.appendChild(s);
   })();
 
   /* ------------------------------------- signature: contributor field */
@@ -110,6 +139,23 @@
       return n;
     }
 
+    // rank percentile drives dot radius and ramp color.
+    // Ramp matches --ramp in the stylesheet (validated ordinal, see tokens).
+    var RAMP = ["#EC9E74", "#DF7647", "#CB5124", "#A63C15", "#78290C"];
+    var N = AUTHORS.length;
+    function impactPct(a) { return N > 1 ? 1 - (a.rank - 1) / (N - 1) : 1; }
+    function rampColor(t) {
+      t = Math.max(0, Math.min(1, t)) * (RAMP.length - 1);
+      var i = Math.min(Math.floor(t), RAMP.length - 2), f = t - i;
+      function chan(hex, o) { return parseInt(hex.substr(o, 2), 16); }
+      var c = [1, 3, 5].map(function (o) {
+        return Math.round(chan(RAMP[i], o) + (chan(RAMP[i + 1], o) - chan(RAMP[i], o)) * f);
+      });
+      return "rgb(" + c.join(",") + ")";
+    }
+    function dotRadius(pct) { return 4 + 4.8 * Math.pow(pct, 1.5); }
+
+
     // --- axis layers, one per view, prebuilt and crossfaded
     VIEWS.forEach(function (spec) {
       var g = svgEl("g", {}, "axis-layer" + (spec.id === state.view ? "" : " axis-hidden"));
@@ -153,26 +199,58 @@
           { transform: "translate(14 " + (m.t + ph / 2) + ") rotate(-90)",
             "text-anchor": "middle" }, "axis-title", ax.yTitle));
       }
+      if (spec.id === "spectrum" && AUTHORS.length > 3) {
+        // dashed ink median + white chip (the reference's annotation device)
+        var imps = AUTHORS.map(function (a) { return a.impact; })
+          .sort(function (x, y) { return x - y; });
+        var mid = imps.length % 2
+          ? imps[(imps.length - 1) / 2]
+          : (imps[imps.length / 2 - 1] + imps[imps.length / 2]) / 2;
+        var mx = PX(mid);
+        var label = "median " + mid.toFixed(3);
+        var chipW = label.length * 8.2 + 22;
+        var chipX = Math.min(Math.max(mx - chipW / 2, m.l + 4), W - m.r - chipW - 4);
+        g.appendChild(svgEl("line",
+          { x1: mx, x2: mx, y1: m.t + 40, y2: PY(1) }, "median-line"));
+        g.appendChild(svgEl("rect",
+          { x: chipX, y: m.t + 6, width: chipW, height: 26, rx: 13 }, "median-chip-box"));
+        g.appendChild(svgEl("text",
+          { x: chipX + chipW / 2, y: m.t + 23.5, "text-anchor": "middle" },
+          "median-chip-text", label));
+      }
+      if (spec.id === "activity") {
+        // region tags, mono uppercase (the reference's HUMAN / AI corner tags)
+        g.appendChild(svgEl("text",
+          { x: m.l + 14, y: m.t + 24 }, "quad-tag", "FEW COMMITS, HIGH IMPACT"));
+        g.appendChild(svgEl("text",
+          { x: W - m.r - 14, y: PY(1) - 18, "text-anchor": "end" }, "quad-tag",
+          "MANY COMMITS, MID-BOARD"));
+      }
       svg.appendChild(g);
     });
 
-    // --- dots: one pair of nodes per author, moved only via transform
+    // --- dots: one <g> per author (dot + focus stop), moved only via
+    // transform on the group. Radius and ramp fill encode rank percentile.
     var points = [];
     AUTHORS.forEach(function (a) {
       var start = a.views.spectrum;
-      var dot = svgEl("circle", { r: 4.5, cx: 0, cy: 0 }, "dot");
+      var pct = impactPct(a);
+      var r = dotRadius(pct);
+      var g = svgEl("g", {}, "pt");
+      var dot = svgEl("circle", { r: r.toFixed(1), cx: 0, cy: 0,
+        fill: rampColor(pct) }, "dot");
       var hit = svgEl("circle",
         { r: 10, cx: 0, cy: 0, tabindex: 0, role: "button" }, "dot-hit");
       hit.setAttribute("aria-label",
         a.name + " — impact " + a.impact.toFixed(3) + ", " + a.commits +
         " commits, rank " + a.rank + ", tier " + a.tier);
-      var p = { a: a, dot: dot, hit: hit, dim: false,
+      g.appendChild(dot); g.appendChild(hit);
+      var p = { a: a, g: g, dot: dot, hit: hit, r: r, dim: false,
                 cx: PX(start[0]), cy: PY(0.5) };
       function place(x, y) {
         p.cx = x; p.cy = y;
-        var t = "translate(" + x.toFixed(1) + " " + y.toFixed(1) + ")";
-        dot.setAttribute("transform", t);
-        hit.setAttribute("transform", t);
+        g.setAttribute("transform",
+          "translate(" + x.toFixed(1) + " " + y.toFixed(1) + ")");
       }
       p.place = place;
       place(p.cx, p.cy);
@@ -185,8 +263,7 @@
       hit.addEventListener("keydown", function (ev) {
         if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); jumpToAuthor(a.name); }
       });
-      svg.appendChild(dot);
-      svg.appendChild(hit);
+      svg.appendChild(g);
       points.push(p);
     });
 
@@ -217,6 +294,73 @@
       });
     })();
     svg.appendChild(overlay);
+
+    // --- spectrum callouts: numbered marks, no leader lines. Each top dot
+    // carries its rank numeral (below it when a stacked tie sits above);
+    // a corner key maps numerals to names. Precise with zero spaghetti.
+    var specOverlay = svgEl("g", {}, "axis-layer");
+    specOverlay.dataset.view = "spectrum";
+    (function spectrumCallouts() {
+      var top = AUTHORS.slice(0, Math.min(6, AUTHORS.length));
+      if (!top.length) return;
+      var placed = [];
+      top.forEach(function (a) {
+        var cx = PX(a.views.spectrum[0]);
+        var cy = PY(a.views.spectrum[1]);
+        var r = dotRadius(impactPct(a));
+        // exact-tie stack (same x): later ranks label below the whole stack
+        var stack = placed.filter(function (q) { return Math.abs(q.cx - cx) < 8; });
+        var ny;
+        if (stack.length) {
+          ny = Math.max.apply(null, stack.map(function (q) {
+            return Math.max(q.cy + q.r, q.ny);
+          })) + 13;
+        } else {
+          ny = cy - r - 6;
+        }
+        placed.push({ cx: cx, cy: Math.max(cy, ny - 4), r: r, ny: ny });
+        specOverlay.appendChild(svgEl("text",
+          { x: cx, y: ny, "text-anchor": "middle" }, "callout-rank",
+          String(a.rank)));
+      });
+      // corner key: fixed numeral column, names left-aligned beside it
+      var maxNameW = Math.max.apply(null, top.map(function (a) {
+        return a.name.length;
+      })) * 6.6;
+      var numX = W - m.r - maxNameW - 12;
+      var keyY = m.t + 14;
+      top.forEach(function (a, i) {
+        var y = keyY + i * 16.5;
+        specOverlay.appendChild(svgEl("text",
+          { x: numX, y: y, "text-anchor": "end" }, "callout-rank",
+          String(a.rank)));
+        specOverlay.appendChild(svgEl("text",
+          { x: numX + 8, y: y }, "callout-name", a.name));
+      });
+    })();
+    svg.appendChild(specOverlay);
+
+    // --- tiers annotation: name the tall column instead of leaving it mute
+    var tiersOverlay = svgEl("g", {}, "axis-layer axis-hidden");
+    tiersOverlay.dataset.view = "tiers";
+    (function tiersAnnotation() {
+      var biggest = D.tiers.reduce(function (m2, t) {
+        return t.count > m2.count ? t : m2;
+      }, D.tiers[0]);
+      if (!biggest || biggest.count < 8) return;
+      var members = AUTHORS.filter(function (a) { return a.tier === biggest.tier; });
+      var cx = PX(members[0].views.tiers[0]);
+      var topY = Math.min.apply(null, members.map(function (a) {
+        return PY(a.views.tiers[1]);
+      }));
+      var lx = Math.min(cx, W - m.r - 150);
+      tiersOverlay.appendChild(svgEl("text",
+        { x: lx, y: topY - 14, "text-anchor": "middle" }, "callout-note",
+        biggest.count + " contributors, one tier"));
+      tiersOverlay.appendChild(svgEl("line",
+        { x1: lx, y1: topY - 10, x2: cx, y2: topY - 5 }, "leader"));
+    })();
+    svg.appendChild(tiersOverlay);
     document.getElementById("field-svg").appendChild(svg);
 
     // SIGNALS is in [ownership, survival, coupling, review] order
@@ -322,21 +466,22 @@
     }
 
     var signalHost = document.getElementById("field-signal");
+    function setView(id) {
+      state.view = id;
+      syncViews();
+      signalHost.hidden = id !== "signals";
+      svg.querySelectorAll(".axis-layer").forEach(function (g) {
+        g.classList.toggle("axis-hidden", g.dataset.view !== id);
+      });
+      document.querySelectorAll(".field-caption p").forEach(function (cap) {
+        cap.hidden = cap.dataset.view !== id;
+      });
+      retarget();
+    }
     var syncViews = radiogroup(
       document.getElementById("field-views"), VIEWS,
       function (id) { return id === state.view; },
-      function (id) {
-        state.view = id;
-        syncViews();
-        signalHost.hidden = id !== "signals";
-        svg.querySelectorAll(".axis-layer").forEach(function (g) {
-          g.classList.toggle("axis-hidden", g.dataset.view !== id);
-        });
-        document.querySelectorAll(".field-caption p").forEach(function (cap) {
-          cap.hidden = cap.dataset.view !== id;
-        });
-        retarget();
-      });
+      setView);
 
     var SIGNAL_VIEWS = [
       { id: "own", label: "Ownership" }, { id: "surv", label: "Survival" },
@@ -377,13 +522,63 @@
         var match = !active.length ||
           active.some(function (c) { return c.test(p.a); });
         p.dim = active.length > 0 && !match;
-        p.dot.classList.toggle("dim", p.dim);
-        p.hit.classList.toggle("dim", p.dim);
+        p.g.classList.toggle("dim", p.dim);
         if (match) n += 1;
       });
       countEl.textContent = active.length ? n + " / " + AUTHORS.length : "";
     }
     applyFilters();
+
+    /* ------------------------- the story: steps drive the same setView the
+       tabs use, so the two affordances can never disagree */
+    (function story() {
+      var stepEls = document.querySelectorAll(".story-rail .step");
+      var progress = document.querySelectorAll("#story-progress i");
+      var noteEl = document.getElementById("explore-note");
+      if (!stepEls.length || !("IntersectionObserver" in window)) return;
+      var ORDER = ["spectrum", "activity", "signals", "tiers"];
+      var SIGNAL_SEQ = ["own", "surv", "coup", "rev"];
+      var autoTimer = null;
+      var signalsTouched = false;
+      var signalsPlayed = false;
+      // any manual signal pick cancels the auto-advance for good
+      signalHost.addEventListener("pointerdown", function () {
+        signalsTouched = true;
+        if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+      });
+      function autoCycleSignals() {
+        if (signalsTouched || signalsPlayed || reducedMotion) return;
+        signalsPlayed = true; // runs once per visit, never re-arms
+        var i = 0;
+        autoTimer = setInterval(function () {
+          i += 1;
+          if (i >= SIGNAL_SEQ.length || signalsTouched || state.view !== "signals") {
+            clearInterval(autoTimer); autoTimer = null;
+            return;
+          }
+          state.signal = SIGNAL_SEQ[i];
+          syncSignals();
+          retarget();
+        }, 1600);
+      }
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (!e.isIntersecting) return;
+          var id = e.target.dataset.step;
+          stepEls.forEach(function (s) {
+            s.classList.toggle("active", s === e.target);
+          });
+          var idx = ORDER.indexOf(id);
+          progress.forEach(function (p, i) {
+            p.classList.toggle("on", i <= idx);
+          });
+          if (state.view !== id) setView(id);
+          if (id === "signals") autoCycleSignals();
+          if (id === "tiers" && noteEl) noteEl.hidden = false;
+        });
+      }, { rootMargin: "-42% 0px -42% 0px", threshold: 0 });
+      stepEls.forEach(function (s) { io.observe(s); });
+    })();
 
     // opening bloom: dots start on the axis line and swarm into place
     retarget();
@@ -393,8 +588,26 @@
   var body = document.getElementById("board-body");
   var search = document.getElementById("search");
   var rowCount = document.getElementById("row-count");
-  var state = { key: "rank", dir: 1, query: "" };
+  var boardFoot = document.getElementById("board-foot");
+  var state = { key: "rank", dir: 1, query: "", showAll: false };
   var openName = null;
+  var DISCLOSE_TIERS = 15; // default view: tiers 1..15, then "Show all"
+
+  function monogramText(name) {
+    // unicode-safe initials: first grapheme of the first two words
+    var clean = name.replace(/<[^>]*>/g, "").trim();
+    var words = clean.split(/\s+/).filter(Boolean).slice(0, 2);
+    function first(s) {
+      if (window.Intl && Intl.Segmenter) {
+        var it = new Intl.Segmenter(undefined, { granularity: "grapheme" })
+          .segment(s)[Symbol.iterator]().next();
+        return it.done ? "" : it.value.segment;
+      }
+      return s.charAt(0);
+    }
+    var initials = words.map(first).join("");
+    return initials ? initials.toUpperCase() : "?";
+  }
 
   function accessor(key) {
     if (key === "rank") return function (a) { return a.rank; };
@@ -417,11 +630,20 @@
     return list;
   }
 
-  function microBar(pct, imputed, wide) {
+  function microBar(pct, imputed, wide, sigKey) {
     var wrap = el("div", wide ? "cbar" : "sig-wrap");
     var track = el("div", "track");
     var fill = el("div", "fill" + (imputed ? " imputed" : ""));
-    fill.style.width = (pct * 100).toFixed(1) + "%";
+    if (wide) {
+      // ramp bar: full-track gradient, width revealed via clip-path (--w)
+      fill.style.setProperty("--w", (pct * 100).toFixed(1) + "%");
+    } else {
+      fill.style.width = (pct * 100).toFixed(1) + "%";
+      if (sigKey) {
+        fill.style.setProperty("--sig-color", SIG_COLORS[sigKey]);
+        if (!imputed) fill.style.background = SIG_COLORS[sigKey];
+      }
+    }
     track.appendChild(fill);
     wrap.appendChild(track);
     if (wide) wrap.appendChild(el("span", "val", pct.toFixed(3)));
@@ -435,7 +657,10 @@
     tr.setAttribute("aria-expanded", "false");
 
     var rank = el("td", "num", String(a.rank));
-    var name = el("td", "name-cell", a.name);
+    var name = el("td", "name-cell");
+    name.appendChild(el("span",
+      "monogram" + (a.tier === 1 ? " t1" : ""), monogramText(a.name)));
+    name.appendChild(document.createTextNode(a.name));
     name.appendChild(el("span", "tier-chip", "T" + a.tier));
     if (a.github) {
       var gh = el("a", "gh-link", "↗");
@@ -452,7 +677,8 @@
 
     SIGNALS.forEach(function (s) {
       var td = el("td", "sig");
-      td.appendChild(microBar(a.signals[s.key], s.key === "review_leverage" && a.flags.review_imputed, false));
+      td.appendChild(microBar(a.signals[s.key],
+        s.key === "review_leverage" && a.flags.review_imputed, false, s.key));
       tr.appendChild(td);
     });
 
@@ -480,11 +706,19 @@
 
   function render() {
     body.textContent = "";
+    boardFoot.textContent = "";
     openName = null;
     var list = visibleAuthors();
     var defaultOrder = state.key === "rank" && state.dir === 1 && !state.query.trim();
+    // progressive disclosure applies only to the untouched default view;
+    // any search or sort works on the full set
+    var shown = list;
+    if (defaultOrder && !state.showAll) {
+      shown = list.filter(function (a) { return a.tier <= DISCLOSE_TIERS; });
+      if (shown.length === list.length) state.showAll = true;
+    }
     var lastTier = null;
-    list.forEach(function (a) {
+    shown.forEach(function (a) {
       // Divider rows only where they say something: a shared tier means the
       // scores are indistinguishable and within-tier order must not be read.
       // Singleton tiers carry their tier in the row chip instead.
@@ -503,7 +737,34 @@
       }
       body.appendChild(buildRow(a));
     });
-    rowCount.textContent = list.length + " / " + AUTHORS.length;
+    if (defaultOrder && !state.showAll && shown.length < list.length) {
+      var more = el("button", "pill-ink",
+        "Show all " + AUTHORS.length + " contributors");
+      more.type = "button";
+      more.addEventListener("click", function () {
+        state.showAll = true;
+        render();
+      });
+      boardFoot.appendChild(more);
+    }
+    if (!list.length) {
+      var empty = el("div", "empty-state");
+      var face = el("div", "empty-face");
+      face.appendChild(el("i")); face.appendChild(el("i")); face.appendChild(el("i"));
+      empty.appendChild(face);
+      empty.appendChild(document.createTextNode(
+        "No one matches “" + state.query.trim() + "”. Try a shorter name, or"));
+      var clear = el("button", null, "clear the filter");
+      clear.type = "button";
+      clear.addEventListener("click", function () {
+        search.value = ""; state.query = ""; render(); search.focus();
+      });
+      empty.appendChild(clear);
+      empty.appendChild(document.createTextNode("."));
+      boardFoot.appendChild(empty);
+    }
+    rowCount.textContent = (defaultOrder && !state.showAll ? shown.length : list.length) +
+      " / " + AUTHORS.length;
     document.querySelectorAll(".board thead th[data-sort]").forEach(function (th) {
       if (th.dataset.sort === state.key) {
         th.setAttribute("aria-sort", state.dir === 1 ? "ascending" : "descending");
@@ -556,7 +817,7 @@
     tr.setAttribute("aria-expanded", "true");
     openName = a.name;
     detail.querySelectorAll(".dbar .fill").forEach(function (f) {
-      f.style.width = f.dataset.w;
+      f.style.setProperty("--w", f.dataset.w);
     });
   }
 
@@ -583,8 +844,10 @@
       if (imputed) lbl.appendChild(el("small", null, "median-imputed"));
       var track = el("div", "track");
       var fill = el("div", "fill" + (imputed ? " imputed" : ""));
+      fill.style.setProperty("--sig-color", SIG_COLORS[s.key]);
+      if (!imputed) fill.style.background = SIG_COLORS[s.key];
       fill.dataset.w = (a.signals[s.key] * 100).toFixed(1) + "%";
-      if (reducedMotion) fill.style.width = fill.dataset.w;
+      if (reducedMotion) fill.style.setProperty("--w", fill.dataset.w);
       track.appendChild(fill);
       bar.appendChild(lbl);
       bar.appendChild(track);
@@ -727,6 +990,7 @@
   function jumpToAuthor(name) {
     if (state.query) { state.query = ""; search.value = ""; }
     if (state.key !== "rank" || state.dir !== 1) { state.key = "rank"; state.dir = 1; }
+    state.showAll = true; // the target row may sit behind the disclosure fold
     render();
     var row = body.querySelector('tr.row[data-name="' + cssEscape(name) + '"]');
     if (!row) return;
@@ -737,6 +1001,91 @@
   function cssEscape(s) {
     return (window.CSS && CSS.escape) ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&");
   }
+
+  /* -------------------------------------------------- quote word-fill */
+  (function quoteFill() {
+    var q = document.getElementById("quote-line");
+    if (!q) return;
+    var words = q.textContent.split(/(\s+)/);
+    q.textContent = "";
+    var spans = [];
+    words.forEach(function (w) {
+      if (/^\s+$/.test(w)) {
+        q.appendChild(document.createTextNode(w));
+      } else if (w) {
+        var s = el("span", "w", w);
+        q.appendChild(s);
+        spans.push(s);
+      }
+    });
+    if (reducedMotion) {
+      spans.forEach(function (s) { s.classList.add("lit"); });
+      return;
+    }
+    var done = false, ticking = false;
+    function update() {
+      ticking = false;
+      if (done) return;
+      var r = q.getBoundingClientRect();
+      var vh = window.innerHeight;
+      var t = (vh * 0.82 - r.top) / (vh * 0.5);
+      t = Math.max(0, Math.min(1, t));
+      var lit = Math.round(t * spans.length);
+      spans.forEach(function (s, i) { s.classList.toggle("lit", i < lit); });
+      if (t >= 1) {
+        done = true;
+        window.removeEventListener("scroll", onScroll);
+      }
+    }
+    function onScroll() {
+      if (!ticking) { ticking = true; requestAnimationFrame(update); }
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    update();
+  })();
+
+  /* -------------------------------------------------- reveals + count-up */
+  function countUp(node) {
+    var target = parseInt(node.dataset.count, 10);
+    var text = node.dataset.text || String(target);
+    if (reducedMotion || !target || target < 10) { node.textContent = text; return; }
+    var t0 = performance.now(), DUR = 700;
+    (function tick(now) {
+      var t = Math.min((now - t0) / DUR, 1);
+      var e = 1 - Math.pow(1 - t, 3);
+      node.textContent = Math.round(target * e).toLocaleString("en-US");
+      if (t < 1) requestAnimationFrame(tick);
+      else node.textContent = text;
+    })(t0);
+  }
+  (function reveals() {
+    var els = document.querySelectorAll("[data-reveal]");
+    function fire(target) {
+      target.classList.add("in");
+      target.querySelectorAll(".tile-value[data-count]").forEach(countUp);
+      if (target.dataset.count !== undefined) countUp(target);
+    }
+    if (!("IntersectionObserver" in window) || reducedMotion) {
+      els.forEach(function (n) { fire(n); });
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        fire(e.target);
+        io.unobserve(e.target);
+      });
+    }, { threshold: 0.2, rootMargin: "0px 0px -5% 0px" });
+    els.forEach(function (n) { io.observe(n); });
+    // safety net: content must never stay hidden if an observation is missed
+    // (print, find-in-page, programmatic capture, exotic scrolling)
+    setTimeout(function () {
+      els.forEach(function (n) {
+        if (!n.classList.contains("in")) fire(n);
+      });
+      io.disconnect();
+    }, 3000);
+  })();
 
   /* ------------------------------------------------------------ scroll spy */
   (function spy() {
@@ -758,6 +1107,11 @@
       if (s) io.observe(s);
     });
   })();
+
+  // print should show the whole table, not the disclosure fold
+  window.addEventListener("beforeprint", function () {
+    if (!state.showAll) { state.showAll = true; render(); }
+  });
 
   /* ------------------------------------------------------- global keyboard */
   document.addEventListener("keydown", function (ev) {
