@@ -91,10 +91,25 @@
   (function fieldStat() {
     var host = document.getElementById("field-stat");
     if (!host || !AUTHORS.length) return;
-    var v = el("div", "v", AUTHORS[0].impact.toFixed(3));
+    var target = AUTHORS[0].impact;
+    var v = el("div", "v", target.toFixed(3));
     var s = el("small", null, "top score · tier 1 of " + D.meta.n_tiers);
     host.appendChild(v);
     host.appendChild(s);
+    if (reducedMotion || !("IntersectionObserver" in window)) return;
+    v.textContent = "0.000";
+    var io = new IntersectionObserver(function (entries) {
+      if (!entries.some(function (e) { return e.isIntersecting; })) return;
+      io.disconnect();
+      var t0 = performance.now(), DUR = 700;
+      (function tick(now) {
+        var t = Math.min((now - t0) / DUR, 1);
+        var e = 1 - Math.pow(1 - t, 3);
+        v.textContent = (target * e).toFixed(3);
+        if (t < 1) requestAnimationFrame(tick);
+      })(t0);
+    }, { threshold: 0.3 });
+    io.observe(host);
   })();
 
   /* ------------------------------------- signature: contributor field */
@@ -376,13 +391,16 @@
       tipShow([{ v: a.impact.toFixed(3), l: a.name }, { l: line2 }], x, y);
     }
 
-    // --- one rAF tween for all dots; retargets cleanly mid-flight
+    // --- one rAF tween for all dots; retargets cleanly mid-flight.
+    // stagger=true (opening bloom only) delays each dot by rank so the
+    // swarm settles as a wave, top scorers first.
     var anim = null;
-    function retarget() {
+    function retarget(stagger) {
       var spec = VIEWS.filter(function (v) { return v.id === state.view; })[0];
       var targets = points.map(function (p) {
         var c = spec.coords(p.a);
-        return { p: p, x0: p.cx, y0: p.cy, x1: PX(c[0]), y1: PY(c[1]) };
+        return { p: p, x0: p.cx, y0: p.cy, x1: PX(c[0]), y1: PY(c[1]),
+                 d: stagger ? (p.a.rank - 1) * 6 : 0 };
       });
       if (reducedMotion) {
         targets.forEach(function (t) { t.p.place(t.x1, t.y1); });
@@ -391,12 +409,14 @@
       if (anim) cancelAnimationFrame(anim);
       var t0 = performance.now(), DUR = 420;
       (function frame(now) {
-        var t = Math.min((now - t0) / DUR, 1);
-        var e = 1 - Math.pow(1 - t, 3);
+        var done = true;
         targets.forEach(function (tg) {
+          var t = Math.min(Math.max((now - t0 - tg.d) / DUR, 0), 1);
+          if (t < 1) done = false;
+          var e = 1 - Math.pow(1 - t, 3);
           tg.p.place(tg.x0 + (tg.x1 - tg.x0) * e, tg.y0 + (tg.y1 - tg.y0) * e);
         });
-        anim = t < 1 ? requestAnimationFrame(frame) : null;
+        anim = done ? null : requestAnimationFrame(frame);
       })(t0);
     }
 
@@ -477,6 +497,7 @@
         cap.hidden = cap.dataset.view !== id;
       });
       retarget();
+      positionThumbs();
     }
     var syncViews = radiogroup(
       document.getElementById("field-views"), VIEWS,
@@ -489,7 +510,27 @@
     ];
     var syncSignals = radiogroup(signalHost, SIGNAL_VIEWS,
       function (id) { return id === state.signal; },
-      function (id) { state.signal = id; syncSignals(); retarget(); });
+      function (id) { state.signal = id; syncSignals(); retarget(); positionThumbs(); });
+
+    // sliding thumbs under the checked tab (both radiogroups)
+    var thumbFns = [];
+    function makeThumb(host) {
+      var t = el("div", "seg-thumb");
+      host.insertBefore(t, host.firstChild);
+      thumbFns.push(function () {
+        var b = host.querySelector('[aria-checked="true"]');
+        if (!b || host.hidden) { t.style.opacity = "0"; return; }
+        t.style.opacity = "1";
+        t.style.width = b.offsetWidth + "px";
+        t.style.transform = "translateX(" + b.offsetLeft + "px)";
+      });
+    }
+    function positionThumbs() { thumbFns.forEach(function (f) { f(); }); }
+    makeThumb(document.getElementById("field-views"));
+    makeThumb(signalHost);
+    window.addEventListener("resize", positionThumbs);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(positionThumbs);
+    positionThumbs();
 
     var CHIPS = [
       { id: "bus", glyph: "⚠", label: "bus-factor",
@@ -559,6 +600,7 @@
           state.signal = SIGNAL_SEQ[i];
           syncSignals();
           retarget();
+          positionThumbs();
         }, 1600);
       }
       var io = new IntersectionObserver(function (entries) {
@@ -581,7 +623,7 @@
     })();
 
     // opening bloom: dots start on the axis line and swarm into place
-    retarget();
+    retarget(true);
   })();
 
   /* ----------------------------------------------------------- leaderboard */
@@ -819,6 +861,20 @@
     detail.querySelectorAll(".dbar .fill").forEach(function (f) {
       f.style.setProperty("--w", f.dataset.w);
     });
+    // sparkline draws itself on first open; the peach area fades in after
+    var sw = detail.querySelector(".spark-wrap");
+    if (sw && !sw.classList.contains("drawn")) {
+      var line = sw.querySelector(".spark-line");
+      if (line && !reducedMotion && line.getTotalLength) {
+        var L = line.getTotalLength();
+        line.style.strokeDasharray = L;
+        line.style.strokeDashoffset = L;
+        void line.getBoundingClientRect();
+        line.style.transition = "stroke-dashoffset 0.45s ease";
+        line.style.strokeDashoffset = "0";
+      }
+      sw.classList.add("drawn");
+    }
   }
 
   function insertDetail(tr, a) {
@@ -1085,6 +1141,21 @@
       });
       io.disconnect();
     }, 3000);
+  })();
+
+  /* ------------------------------------------------------- nav elevation */
+  (function navElevation() {
+    var nav = document.querySelector(".nav");
+    if (!nav) return;
+    var ticking = false;
+    function update() {
+      ticking = false;
+      nav.classList.toggle("scrolled", window.scrollY > 8);
+    }
+    window.addEventListener("scroll", function () {
+      if (!ticking) { ticking = true; requestAnimationFrame(update); }
+    }, { passive: true });
+    update();
   })();
 
   /* ------------------------------------------------------------ scroll spy */

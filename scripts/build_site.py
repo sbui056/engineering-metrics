@@ -255,13 +255,16 @@ def cochange_arc_svg(
     }
 
     paths = []
-    for (a, b), _ in top:
+    for i, ((a, b), _) in enumerate(top):
         x1, x2 = sorted((xs[a], xs[b]))
         r = (x2 - x1) / 2
         if r < 8:
             continue
+        # pathLength=1 normalizes the dash geometry so CSS can draw each arc
+        # in with a staggered stroke-dashoffset animation (--i is the delay)
         paths.append(
-            f'<path d="M{x1:.0f} {height} A {r:.0f} {r:.0f} 0 0 1 {x2:.0f} {height}"/>'
+            f'<path d="M{x1:.0f} {height} A {r:.0f} {r:.0f} 0 0 1 {x2:.0f} {height}" '
+            f'pathLength="1" style="--i:{i}"/>'
         )
     dots = "".join(
         f'<circle cx="{xs[f]:.0f}" cy="{height}" r="2.5"/>' for f in slots[:: max(len(slots) // 12, 1)]
