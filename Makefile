@@ -44,6 +44,11 @@ validate:
 site: narrate
 	$(PYTHON) scripts/build_site.py
 
+# The one static OG image (crawler-fetched; not a page resource). Dev-only:
+# needs playwright. Set SITE_URL when building the site for absolute og:image.
+og:
+	$(PYTHON) scripts/render_og.py
+
 all: narrate validate site
 
 clean:

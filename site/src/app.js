@@ -87,32 +87,65 @@
     });
   })();
 
-  /* ------------------------------------------------- card header stat */
+  /* ------------------------------------------------- card header stat
+     the page's ONE odometer: per-digit clip-mask rolls, fast, instrument-
+     styled. Finishes (and beforeprint-forces) to plain text in the DOM. */
   (function fieldStat() {
     var host = document.getElementById("field-stat");
     if (!host || !AUTHORS.length) return;
     var target = AUTHORS[0].impact;
-    var v = el("div", "v", target.toFixed(3));
+    var text = target.toFixed(3);
+    var v = el("div", "v", text);
     var s = el("small", null, "top score · tier 1 of " + D.meta.n_tiers);
     host.appendChild(v);
     host.appendChild(s);
     if (reducedMotion || !("IntersectionObserver" in window)) return;
-    v.textContent = "0.000";
+    // build the digit columns (non-digits pass through as static chars)
+    var done = false;
+    function finalize() {
+      if (done) return;
+      done = true;
+      v.textContent = text;
+      v.removeAttribute("aria-label");
+    }
+    v.textContent = "";
+    v.setAttribute("aria-label", text);
+    var cols = [];
+    text.split("").forEach(function (ch, i) {
+      if (!/\d/.test(ch)) {
+        v.appendChild(el("span", "odo-static", ch));
+        return;
+      }
+      var d = el("span", "odo-d");
+      var col = el("span", "odo-col");
+      for (var n = 0; n <= 9; n++) col.appendChild(el("span", "odo-n", String(n)));
+      col.style.setProperty("--od", String(cols.length));
+      d.appendChild(col);
+      v.appendChild(d);
+      cols.push({ col: col, digit: +ch });
+    });
     var io = new IntersectionObserver(function (entries) {
       if (!entries.some(function (e) { return e.isIntersecting; })) return;
       io.disconnect();
-      var t0 = performance.now(), DUR = 700;
-      (function tick(now) {
-        var t = Math.min((now - t0) / DUR, 1);
-        var e = 1 - Math.pow(1 - t, 3);
-        v.textContent = (target * e).toFixed(3);
-        if (t < 1) requestAnimationFrame(tick);
-      })(t0);
+      requestAnimationFrame(function () {
+        cols.forEach(function (c) {
+          c.col.style.transform = "translateY(" + (-c.digit) + "em)";
+        });
+      });
+      var last = cols[cols.length - 1];
+      if (!last) { finalize(); return; }
+      last.col.addEventListener("transitionend", finalize, { once: true });
+      setTimeout(finalize, 1400); // safety net if transitions are killed
     }, { threshold: 0.3 });
     io.observe(host);
+    window.addEventListener("beforeprint", finalize);
   })();
 
   /* ------------------------------------- signature: contributor field */
+  var highlightDot = null;  // set by the field; used by the leaderboard detail
+  var setFieldView = null;  // set by the field; used by hash-state routing
+  var hashSetC = null;      // set by the hash module; used by tap-to-pin
+  var onFieldViewChange = null; // set by the hash module; called from setView
   (function field() {
     var NS = "http://www.w3.org/2000/svg";
     var F = D.field;
@@ -127,7 +160,7 @@
       { id: "spectrum", label: "Spectrum",
         coords: function (a) { return a.views.spectrum; },
         axis: { pct: true, xTitle: "impact score" } },
-      { id: "activity", label: "Activity vs impact",
+      { id: "activity", label: "Activity vs impact", short: "Activity",
         coords: function (a) { return a.views.activity; },
         axis: { xTicks: F.x_ticks, yTicks: [0, 0.25, 0.5, 0.75, 1],
                 xTitle: "commits — rejected baseline (log scale)",
@@ -246,26 +279,36 @@
 
     // --- dots: one <g> per author (dot + focus stop), moved only via
     // transform on the group. Radius and ramp fill encode rank percentile.
+    // All dots live in one .dot-layer group: above the axis layers, below
+    // the callout overlays.
     var points = [];
-    AUTHORS.forEach(function (a) {
+    var dotLayer = svgEl("g", {}, "dot-layer");
+    AUTHORS.forEach(function (a, ai) {
       var start = a.views.spectrum;
       var pct = impactPct(a);
       var r = dotRadius(pct);
       var g = svgEl("g", {}, "pt");
       var dot = svgEl("circle", { r: r.toFixed(1), cx: 0, cy: 0,
         fill: rampColor(pct) }, "dot");
-      var hit = svgEl("circle",
-        { r: 10, cx: 0, cy: 0, tabindex: 0, role: "button" }, "dot-hit");
+      var hit = svgEl("circle", // roving tabindex: only rank 1 is a tab stop
+        { r: 10, cx: 0, cy: 0, tabindex: ai === 0 ? 0 : -1, role: "button" }, "dot-hit");
       hit.setAttribute("aria-label",
         a.name + " — impact " + a.impact.toFixed(3) + ", " + a.commits +
         " commits, rank " + a.rank + ", tier " + a.tier);
       g.appendChild(dot); g.appendChild(hit);
       var p = { a: a, g: g, dot: dot, hit: hit, r: r, dim: false,
-                cx: PX(start[0]), cy: PY(0.5) };
-      function place(x, y) {
+                cx: PX(start[0]), cy: PY(0.5),
+                // spring state: velocity, target, settled flag, and a small
+                // deterministic per-dot stiffness jitter so the field
+                // settles organically instead of in lockstep
+                vx: 0, vy: 0, tx: PX(start[0]), ty: PY(0.5), settled: true,
+                k: 90 * (0.9 + 0.2 * (((ai * 2654435761) % 997) / 997)),
+                wakeAt: 0,
+                fs: 1, fox: 0, foy: 0 }; // loupe scale + offset (eased)
+      function place(x, y, suffix) {
         p.cx = x; p.cy = y;
         g.setAttribute("transform",
-          "translate(" + x.toFixed(1) + " " + y.toFixed(1) + ")");
+          "translate(" + x.toFixed(1) + " " + y.toFixed(1) + ")" + (suffix || ""));
       }
       p.place = place;
       place(p.cx, p.cy);
@@ -278,9 +321,10 @@
       hit.addEventListener("keydown", function (ev) {
         if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); jumpToAuthor(a.name); }
       });
-      svg.appendChild(g);
+      dotLayer.appendChild(g);
       points.push(p);
     });
+    svg.appendChild(dotLayer);
 
     // --- outlier labels for the activity view (collision pass + leaders),
     // drawn above the dots and faded with that view
@@ -391,33 +435,86 @@
       tipShow([{ v: a.impact.toFixed(3), l: a.name }, { l: line2 }], x, y);
     }
 
-    // --- one rAF tween for all dots; retargets cleanly mid-flight.
-    // stagger=true (opening bloom only) delays each dot by rank so the
-    // swarm settles as a wave, top scorers first.
-    var anim = null;
+    // --- spring physics: one rAF, per-dot critically-damped springs.
+    // Retargeting only rewrites (tx,ty), so momentum survives view switches
+    // and every morph is interruptible. During flight each dot elongates
+    // along its motion vector (velocity-stretch) and snaps crisp at rest.
+    // The loop sleeps when every dot rests, so idle CPU stays at zero.
+    // stagger=true (opening bloom only) delays each dot's wake by rank.
+    var anim = null, lastT = 0;
+    // loupe focus (viewBox coords): dots near the pointer swell and separate
+    // with a gaussian falloff — a magnifier over the instrument, eased so it
+    // breathes instead of snapping. Hit-testing stays on the true (cx,cy).
+    var fx = 0, fy = 0, fActive = false;
+    var SIG2 = 2 * 55 * 55;
+    function springFrame(now) {
+      var dt = Math.min((now - lastT) / 1000, 1 / 30);
+      lastT = now;
+      var alive = false;
+      points.forEach(function (p) {
+        var suffix = "";
+        if (!p.settled) {
+          if (now < p.wakeAt) {
+            alive = true;
+          } else {
+            var c = 2 * Math.sqrt(p.k); // critical damping
+            p.vx += (p.k * (p.tx - p.cx) - c * p.vx) * dt;
+            p.vy += (p.k * (p.ty - p.cy) - c * p.vy) * dt;
+            var nx = p.cx + p.vx * dt, ny = p.cy + p.vy * dt;
+            var speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+            if (Math.abs(p.tx - nx) < 0.1 && Math.abs(p.ty - ny) < 0.1 && speed < 8) {
+              p.vx = 0; p.vy = 0; p.cx = p.tx; p.cy = p.ty; p.settled = true;
+            } else {
+              alive = true;
+              p.cx = nx; p.cy = ny;
+              var s = Math.min(1 + speed * 0.0005, 1.6); // oscilloscope stretch
+              if (s > 1.02) {
+                var deg = Math.atan2(p.vy, p.vx) * 180 / Math.PI;
+                suffix = " rotate(" + deg.toFixed(1) + ") scale(" + s.toFixed(3) +
+                  " " + (1 / Math.sqrt(s)).toFixed(3) + ") rotate(" +
+                  (-deg).toFixed(1) + ")";
+              }
+            }
+          }
+        }
+        var ts = 1, tox = 0, toy = 0;
+        if (fActive) {
+          var dx = p.cx - fx, dy = p.cy - fy, d2 = dx * dx + dy * dy;
+          var gau = Math.exp(-d2 / SIG2);
+          if (gau > 0.02) {
+            ts = 1 + 0.5 * gau;
+            var dist = Math.sqrt(d2) || 1;
+            tox = dx / dist * 11 * gau; toy = dy / dist * 11 * gau;
+          }
+        }
+        p.fs += (ts - p.fs) * 0.22;
+        p.fox += (tox - p.fox) * 0.22;
+        p.foy += (toy - p.foy) * 0.22;
+        var hasF = Math.abs(p.fs - 1) > 0.004 ||
+                   Math.abs(p.fox) > 0.05 || Math.abs(p.foy) > 0.05;
+        if (hasF) alive = true;
+        else if (p.fs !== 1) { p.fs = 1; p.fox = 0; p.foy = 0; }
+        if (!suffix && p.fs > 1.004) suffix = " scale(" + p.fs.toFixed(3) + ")";
+        p.g.setAttribute("transform",
+          "translate(" + (p.cx + p.fox).toFixed(1) + " " +
+          (p.cy + p.foy).toFixed(1) + ")" + suffix);
+      });
+      anim = alive ? requestAnimationFrame(springFrame) : null;
+    }
+    function wake() {
+      if (!anim) { lastT = performance.now(); anim = requestAnimationFrame(springFrame); }
+    }
     function retarget(stagger) {
       var spec = VIEWS.filter(function (v) { return v.id === state.view; })[0];
-      var targets = points.map(function (p) {
+      var now = performance.now();
+      points.forEach(function (p) {
         var c = spec.coords(p.a);
-        return { p: p, x0: p.cx, y0: p.cy, x1: PX(c[0]), y1: PY(c[1]),
-                 d: stagger ? (p.a.rank - 1) * 6 : 0 };
+        p.tx = PX(c[0]); p.ty = PY(c[1]);
+        if (reducedMotion) { p.place(p.tx, p.ty); return; }
+        p.settled = false;
+        p.wakeAt = stagger ? now + (p.a.rank - 1) * 6 : 0;
       });
-      if (reducedMotion) {
-        targets.forEach(function (t) { t.p.place(t.x1, t.y1); });
-        return;
-      }
-      if (anim) cancelAnimationFrame(anim);
-      var t0 = performance.now(), DUR = 420;
-      (function frame(now) {
-        var done = true;
-        targets.forEach(function (tg) {
-          var t = Math.min(Math.max((now - t0 - tg.d) / DUR, 0), 1);
-          if (t < 1) done = false;
-          var e = 1 - Math.pow(1 - t, 3);
-          tg.p.place(tg.x0 + (tg.x1 - tg.x0) * e, tg.y0 + (tg.y1 - tg.y0) * e);
-        });
-        anim = done ? null : requestAnimationFrame(frame);
-      })(t0);
+      if (!reducedMotion) wake();
     }
 
     // --- nearest-point pointer layer (skips dimmed dots; focus never does)
@@ -436,7 +533,39 @@
       var px = Math.sqrt(bestD) * box.width / W;
       return px <= 32 ? best : null;
     }
+    // --- instrument crosshair: hairline reticle + mono readout, mouse only
+    var crossG = svgEl("g", { display: "none" }, "crosshair");
+    var chV = svgEl("line", { y1: m.t, y2: PY(1) });
+    var chH = svgEl("line", { x1: m.l, x2: W - m.r });
+    var chTxt = svgEl("text", {}, "crosshair-txt");
+    crossG.appendChild(chV); crossG.appendChild(chH); crossG.appendChild(chTxt);
+    svg.insertBefore(crossG, dotLayer); // under the dots, over the grid
+    function crosshair(sx, sy) {
+      if (sx < m.l || sx > W - m.r || sy < m.t || sy > PY(1)) {
+        crossG.setAttribute("display", "none"); return;
+      }
+      crossG.removeAttribute("display");
+      chV.setAttribute("x1", sx); chV.setAttribute("x2", sx);
+      chH.setAttribute("y1", sy); chH.setAttribute("y2", sy);
+      var fr = (sx - m.l) / pw, label = "";
+      if (state.view === "spectrum") label = "impact " + fr.toFixed(3);
+      else if (state.view === "signals") label = Math.round(fr * 100) + "th pct";
+      chTxt.textContent = label;
+      if (label) {
+        var flip = sx > m.l + pw * 0.8;
+        chTxt.setAttribute("x", sx + (flip ? -8 : 8));
+        chTxt.setAttribute("y", m.t + 16);
+        chTxt.setAttribute("text-anchor", flip ? "end" : "start");
+      }
+    }
     svg.addEventListener("pointermove", function (ev) {
+      var box = svg.getBoundingClientRect();
+      var sx = (ev.clientX - box.left) * W / box.width;
+      var sy = (ev.clientY - box.top) * H / box.height;
+      if (ev.pointerType !== "touch") {
+        crosshair(sx, sy);
+        if (!reducedMotion) { fx = sx; fy = sy; fActive = true; wake(); }
+      }
       var p = nearestPoint(ev);
       if (p !== hotPoint) {
         if (hotPoint) hotPoint.dot.classList.remove("hot");
@@ -449,16 +578,64 @@
     svg.addEventListener("pointerleave", function () {
       if (hotPoint) { hotPoint.dot.classList.remove("hot"); hotPoint = null; }
       tipHide();
+      crossG.setAttribute("display", "none");
+      if (fActive) { fActive = false; wake(); } // ease the loupe back out
     });
+    // continuity (dot -> row): a proxy dot flies to where the row will land
+    function flyToBoard(p) {
+      if (reducedMotion || !document.body.animate) return;
+      var box = svg.getBoundingClientRect();
+      var x0 = box.left + p.cx * box.width / W;
+      var y0 = box.top + p.cy * box.height / H;
+      var d = document.createElement("div");
+      d.className = "proxy-dot";
+      d.style.background = p.dot.getAttribute("fill");
+      d.style.left = x0 + "px"; d.style.top = y0 + "px";
+      document.body.appendChild(d);
+      // fly to viewport center: the row is scrolled to block:center, so this
+      // is its known destination (never chase the moving rect)
+      var dx = window.innerWidth / 2 - x0, dy = window.innerHeight / 2 - y0;
+      d.animate([
+        { transform: "translate(0,0) scale(1)", opacity: 1 },
+        { transform: "translate(" + dx + "px," + dy + "px) scale(1.5)",
+          opacity: 0.9, offset: 0.8 },
+        { transform: "translate(" + dx + "px," + dy + "px) scale(0.3)", opacity: 0 }
+      ], { duration: 650, easing: "cubic-bezier(0.16, 1, 0.3, 1)" })
+        .onfinish = function () { d.remove(); };
+    }
     svg.addEventListener("click", function (ev) {
       var p = nearestPoint(ev);
-      if (p) jumpToAuthor(p.a.name);
+      if (lastPointerType === "touch") {
+        // touch: pin the strip below the chart (hover never happens here)
+        if (p) pinContributor(p);
+        else if (pinStrip) pinStrip.hidden = true;
+        return;
+      }
+      if (p) { flyToBoard(p); jumpToAuthor(p.a.name); }
     });
+    // continuity (row -> dot): the leaderboard detail lights this author's dot
+    highlightDot = function (name) {
+      var p = null;
+      points.forEach(function (q) { if (q.a.name === name) p = q; });
+      if (!p) return;
+      var r = svg.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight) return;
+      p.dot.classList.add("hot");
+      setTimeout(function () {
+        if (p !== hotPoint) p.dot.classList.remove("hot");
+      }, 1400);
+    };
 
     // --- controls: view radiogroup, signal radiogroup, filter chips
     function radiogroup(host, items, isChecked, onPick) {
       var buttons = items.map(function (it) {
-        var b = el("button", null, it.label);
+        var b = el("button");
+        if (it.short) { // long label on desktop, short on phones
+          b.appendChild(el("span", "lbl-l", it.label));
+          b.appendChild(el("span", "lbl-s", it.short));
+        } else {
+          b.textContent = it.label;
+        }
         b.type = "button";
         b.setAttribute("role", "radio");
         b.dataset.id = it.id;
@@ -488,6 +665,7 @@
     var signalHost = document.getElementById("field-signal");
     function setView(id) {
       state.view = id;
+      if (typeof onFieldViewChange === "function") onFieldViewChange(id);
       syncViews();
       signalHost.hidden = id !== "signals";
       svg.querySelectorAll(".axis-layer").forEach(function (g) {
@@ -622,6 +800,104 @@
       stepEls.forEach(function (s) { io.observe(s); });
     })();
 
+    // --- roving arrow-key navigation through the dots (one tab stop total)
+    (function rovingDots() {
+      var current = 0;
+      function focusDot(i) {
+        i = Math.max(0, Math.min(points.length - 1, i));
+        points[current].hit.setAttribute("tabindex", "-1");
+        current = i;
+        points[current].hit.setAttribute("tabindex", "0");
+        points[current].hit.focus();
+      }
+      dotLayer.addEventListener("keydown", function (ev) {
+        var step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[ev.key];
+        if (ev.key === "Home") { ev.preventDefault(); focusDot(0); return; }
+        if (ev.key === "End") { ev.preventDefault(); focusDot(points.length - 1); return; }
+        if (!step) return;
+        ev.preventDefault();
+        focusDot(current + step);
+      });
+      dotLayer.setAttribute("role", "group");
+      dotLayer.setAttribute("aria-label",
+        "Contributor dots, ordered by rank. Use arrow keys to move between contributors.");
+    })();
+
+    // --- tap-to-pin: the touch answer to hover (fixed strip under the chart)
+    var pinStrip = null;
+    function pinContributor(p) {
+      if (!pinStrip) {
+        pinStrip = el("div", "pin-strip");
+        var stage = document.querySelector(".field-stage");
+        stage.parentNode.insertBefore(pinStrip, stage.nextSibling);
+      }
+      pinStrip.hidden = false;
+      pinStrip.textContent = "";
+      var dot = el("span", "pin-dot");
+      dot.style.background = p.dot.getAttribute("fill");
+      pinStrip.appendChild(dot);
+      var label = el("span");
+      label.appendChild(el("b", null, p.a.name));
+      pinStrip.appendChild(label);
+      pinStrip.appendChild(el("span", "pin-meta",
+        "T" + p.a.tier + " · " + p.a.impact.toFixed(3) + " · rank " + p.a.rank));
+      var go = el("button", null, "view in table →");
+      go.type = "button";
+      go.addEventListener("click", function () { jumpToAuthor(p.a.name); });
+      pinStrip.appendChild(go);
+      if (hashSetC) hashSetC(p.a.name);
+    }
+    var lastPointerType = "mouse";
+    svg.addEventListener("pointerdown", function (ev) {
+      lastPointerType = ev.pointerType || "mouse";
+    }, { passive: true });
+
+    // --- scrollBus: one passive listener + one rAF for the new scroll
+    // consumers (dot inertia + story gauge). The four shipped handlers
+    // elsewhere keep their own ticking pattern.
+    (function scrollBus() {
+      if (reducedMotion) return;
+      var storyGrid = document.querySelector(".story-grid");
+      var dashes = document.querySelectorAll("#story-progress i");
+      var lastY = window.scrollY, ticking = false;
+      function tick() {
+        ticking = false;
+        var y = window.scrollY;
+        var dy = y - lastY;
+        lastY = y;
+        // inertia: the instrument has mass — dots trail the scroll and
+        // spring back. Accumulated-velocity clamp (trackpads stack events);
+        // teleport guard so anchor jumps don't detonate the field.
+        if (dy !== 0 && Math.abs(dy) <= 120) {
+          var r = svg.getBoundingClientRect();
+          if (r.bottom > 0 && r.top < window.innerHeight) {
+            points.forEach(function (p) {
+              p.vy = Math.max(-70, Math.min(70, p.vy + dy * 0.5));
+              p.settled = false;
+            });
+            wake();
+          }
+        }
+        // gauge: dashes fill continuously with progress through the story
+        if (storyGrid && dashes.length) {
+          var sr = storyGrid.getBoundingClientRect();
+          if (sr.bottom > 0 && sr.top < window.innerHeight) {
+            var prog = (window.innerHeight * 0.58 - sr.top) / sr.height;
+            prog = Math.max(0, Math.min(1, prog));
+            dashes.forEach(function (d, i) {
+              var f = Math.max(0, Math.min(1, prog * dashes.length - i));
+              d.style.setProperty("--fill", f.toFixed(3));
+            });
+          }
+        }
+      }
+      window.addEventListener("scroll", function () {
+        if (!ticking) { ticking = true; requestAnimationFrame(tick); }
+      }, { passive: true });
+    })();
+
+    setFieldView = setView; // hash-state routing drives the same code path
+
     // opening bloom: dots start on the axis line and swarm into place
     retarget(true);
   })();
@@ -634,6 +910,27 @@
   var state = { key: "rank", dir: 1, query: "", showAll: false };
   var openName = null;
   var DISCLOSE_TIERS = 15; // default view: tiers 1..15, then "Show all"
+  var updateSeg = function () {}; // bound by thesisToggle below
+  var writeHash = function () {}; // bound by hashState below
+  var currentFieldView = "spectrum"; // mirrored from the field via onFieldViewChange
+
+  // bar growth on first viewport entry: one-shot per AUTHOR (never re-animates
+  // across sorts/searches — frequency law), rows themselves never hide
+  var seenRows = {};
+  var rowIO = (!reducedMotion && "IntersectionObserver" in window)
+    ? new IntersectionObserver(function (entries) {
+        var batch = 0;
+        entries.forEach(function (e) {
+          if (!e.isIntersecting) return;
+          var fill = e.target.querySelector(".cbar .fill");
+          if (fill) fill.style.transitionDelay = Math.min(batch * 20, 60) + "ms";
+          batch += 1;
+          e.target.classList.add("seen");
+          seenRows[e.target.dataset.name] = true;
+          rowIO.unobserve(e.target);
+        });
+      }, { threshold: 0.1 })
+    : null;
 
   function monogramText(name) {
     // unicode-safe initials: first grapheme of the first two words
@@ -655,6 +952,7 @@
     if (key === "rank") return function (a) { return a.rank; };
     if (key === "name") return function (a) { return a.name.toLowerCase(); };
     if (key === "impact") return function (a) { return a.impact; };
+    if (key === "commits") return function (a) { return a.commits; };
     return function (a) { return a.signals[key]; };
   }
 
@@ -665,6 +963,11 @@
     });
     var get = accessor(state.key);
     list = list.slice().sort(function (a, b) {
+      if (q) { // starts-with matches rank first while filtering
+        var sa = a.name.toLowerCase().indexOf(q) === 0 ? 0 : 1;
+        var sb = b.name.toLowerCase().indexOf(q) === 0 ? 0 : 1;
+        if (sa !== sb) return sa - sb;
+      }
       var va = get(a), vb = get(b);
       var c = va < vb ? -1 : va > vb ? 1 : a.rank - b.rank;
       return c * state.dir;
@@ -698,11 +1001,22 @@
     tr.dataset.name = a.name;
     tr.setAttribute("aria-expanded", "false");
 
+    if (seenRows[a.name] || !rowIO) tr.classList.add("seen");
     var rank = el("td", "num", String(a.rank));
     var name = el("td", "name-cell");
     name.appendChild(el("span",
       "monogram" + (a.tier === 1 ? " t1" : ""), monogramText(a.name)));
-    name.appendChild(document.createTextNode(a.name));
+    // search-match highlighting: substring wrapped in <mark>; the name enters
+    // the DOM via text nodes only (never markup)
+    var q = state.query.trim().toLowerCase();
+    var at = q ? a.name.toLowerCase().indexOf(q) : -1;
+    if (at >= 0) {
+      name.appendChild(document.createTextNode(a.name.slice(0, at)));
+      name.appendChild(el("mark", null, a.name.slice(at, at + q.length)));
+      name.appendChild(document.createTextNode(a.name.slice(at + q.length)));
+    } else {
+      name.appendChild(document.createTextNode(a.name));
+    }
     name.appendChild(el("span", "tier-chip", "T" + a.tier));
     if (a.github) {
       var gh = el("a", "gh-link", "↗");
@@ -814,6 +1128,48 @@
         th.removeAttribute("aria-sort");
       }
     });
+    updateSeg();
+    if (rowIO) {
+      body.querySelectorAll("tr.row:not(.seen)").forEach(function (r) {
+        rowIO.observe(r);
+      });
+    }
+  }
+
+  /* FLIP reorder: rows fly to their new positions on sort (never on search
+     keystrokes — high-frequency interactions stay instant). Rows are matched
+     by dataset.name because render() rebuilds every node. */
+  function flipRender() {
+    var before = {};
+    if (!reducedMotion) {
+      body.querySelectorAll("tr.row").forEach(function (r) {
+        before[r.dataset.name] = r.getBoundingClientRect().top;
+      });
+    }
+    render();
+    if (reducedMotion) return;
+    var movers = [];
+    body.querySelectorAll("tr.row").forEach(function (r) {
+      if (movers.length >= 30) return;
+      var old = before[r.dataset.name];
+      if (old === undefined) return;
+      var d = old - r.getBoundingClientRect().top;
+      if (!d || Math.abs(d) > window.innerHeight) return;
+      r.style.transition = "none";
+      r.style.transform = "translateY(" + d.toFixed(0) + "px)";
+      movers.push(r);
+    });
+    if (!movers.length) return;
+    requestAnimationFrame(function () { requestAnimationFrame(function () {
+      movers.forEach(function (r, i) {
+        r.style.transition = "transform 240ms cubic-bezier(0.16, 1, 0.3, 1) " +
+          Math.min(i * 8, 64) + "ms";
+        r.style.transform = "";
+      });
+      setTimeout(function () {
+        movers.forEach(function (r) { r.style.transition = ""; });
+      }, 420);
+    }); });
   }
 
   document.querySelectorAll(".board thead th[data-sort]").forEach(function (th) {
@@ -825,13 +1181,79 @@
         state.key = key;
         state.dir = (key === "rank" || key === "name") ? 1 : -1; // scores default high→low
       }
-      render();
+      flipRender();
+      writeHash(false); // refinement: replaceState
     });
   });
+
+  /* the thesis toggle (State of JS steal): flip between impact rank and raw
+     commit count and watch specific people physically trade places — the
+     rejected baseline made felt. */
+  (function thesisToggle() {
+    var tools = document.querySelector(".table-tools");
+    if (!tools) return;
+    var seg = el("div", "seg seg-board");
+    seg.setAttribute("role", "radiogroup");
+    seg.setAttribute("aria-label", "Rank the board by");
+    var thumb = el("span", "seg-thumb");
+    thumb.setAttribute("aria-hidden", "true");
+    seg.appendChild(thumb);
+    var defs = [
+      { id: "impact", label: "By impact",
+        on: function () { state.key = "rank"; state.dir = 1; } },
+      { id: "commits", label: "By raw commits",
+        on: function () { state.key = "commits"; state.dir = -1; } }
+    ];
+    var btns = defs.map(function (d) {
+      var b = el("button", null, d.label);
+      b.type = "button";
+      b.setAttribute("role", "radio");
+      b.addEventListener("click", function () { d.on(); flipRender(); writeHash(false); });
+      seg.appendChild(b);
+      return b;
+    });
+    tools.insertBefore(seg, tools.querySelector(".table-tools-note"));
+    function checkedIndex() {
+      if (state.key === "rank" && state.dir === 1) return 0;
+      if (state.key === "commits") return 1;
+      return -1; // a header sort owns the order
+    }
+    updateSeg = function () {
+      var idx = checkedIndex();
+      btns.forEach(function (b, i) {
+        b.setAttribute("aria-checked", String(i === idx));
+      });
+      var b = btns[idx];
+      thumb.style.opacity = b ? "1" : "0";
+      if (b) {
+        thumb.style.width = b.offsetWidth + "px";
+        thumb.style.transform = "translateX(" + b.offsetLeft + "px)";
+      }
+    };
+    window.addEventListener("resize", updateSeg);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(updateSeg);
+    updateSeg();
+  })();
 
   search.addEventListener("input", function () {
     state.query = search.value;
     render();
+  });
+  // combobox-lite keys: Down into the rows, Esc clears / returns
+  search.addEventListener("keydown", function (ev) {
+    if (ev.key === "ArrowDown") {
+      var first = body.querySelector("tr.row");
+      if (first) { ev.preventDefault(); first.focus(); }
+    } else if (ev.key === "Escape" && search.value) {
+      ev.preventDefault();
+      search.value = ""; state.query = ""; render();
+    }
+  });
+  body.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape") {
+      closeDetail();
+      search.focus();
+    }
   });
 
   /* ------------------------------------------------------------- detail */
@@ -842,7 +1264,7 @@
       var row = open.previousSibling;
       if (row && row.classList) row.setAttribute("aria-expanded", "false");
     }
-    openName = null;
+    if (openName !== null) { openName = null; writeHash(false); }
   }
 
   function toggleDetail(tr, a) {
@@ -857,7 +1279,9 @@
     void detail.offsetHeight;
     detail.classList.add("open");
     tr.setAttribute("aria-expanded", "true");
+    if (highlightDot) highlightDot(a.name); // continuity: light the field dot
     openName = a.name;
+    writeHash(true); // selection is a navigation act: pushState
     detail.querySelectorAll(".dbar .fill").forEach(function (f) {
       f.style.setProperty("--w", f.dataset.w);
     });
@@ -948,6 +1372,42 @@
     });
     chips.appendChild(el("span", "chip", "shown, not scored"));
     left.appendChild(chips);
+
+    // share affordances: permalink + row-as-markdown (dev-native primitives)
+    var actions = el("div", "detail-actions");
+    function copyButton(label, makeText) {
+      var btn = el("button", null, label);
+      btn.type = "button";
+      btn.addEventListener("click", function () {
+        if (!navigator.clipboard) return;
+        navigator.clipboard.writeText(makeText()).then(function () {
+          btn.classList.add("copied");
+          btn.textContent = "copied ✓";
+          setTimeout(function () {
+            btn.classList.remove("copied");
+            btn.textContent = label;
+          }, 1400);
+        });
+      });
+      actions.appendChild(btn);
+    }
+    function permalink() {
+      return location.origin === "null" || location.protocol === "file:"
+        ? location.href.split("#")[0] + "#c=" + encodeURIComponent(a.name)
+        : location.origin + location.pathname + "#c=" + encodeURIComponent(a.name);
+    }
+    copyButton("copy link", permalink);
+    copyButton("copy as markdown", function () {
+      var s = a.signals;
+      return "| contributor | tier | impact | own | surv | coup | rev |\n" +
+        "|---|---|---|---|---|---|---|\n" +
+        "| " + a.name + " | T" + a.tier + " | " + a.impact.toFixed(3) + " | " +
+        s.ownership_concentration.toFixed(2) + " | " +
+        s.code_survival_tenure_normalized.toFixed(2) + " | " +
+        s.coupling_criticality.toFixed(2) + " | " +
+        s.review_leverage.toFixed(2) + " |\n\n" + permalink();
+    });
+    left.appendChild(actions);
 
     if (a.weekly && a.weekly.some(function (w) { return w > 0; })) {
       var sw = el("div", "spark-wrap");
@@ -1045,7 +1505,6 @@
 
   function jumpToAuthor(name) {
     if (state.query) { state.query = ""; search.value = ""; }
-    if (state.key !== "rank" || state.dir !== 1) { state.key = "rank"; state.dir = 1; }
     state.showAll = true; // the target row may sit behind the disclosure fold
     render();
     var row = body.querySelector('tr.row[data-name="' + cssEscape(name) + '"]');
@@ -1053,10 +1512,83 @@
     toggleDetail(row, byName[name]);
     row.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
     row.focus({ preventScroll: true });
+    if (!reducedMotion) {
+      row.classList.add("pulse"); // lands as the proxy dot arrives
+      setTimeout(function () { row.classList.remove("pulse"); }, 1600);
+    }
   }
   function cssEscape(s) {
     return (window.CSS && CSS.escape) ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&");
   }
+
+  /* ------------------------------------------------------------ hash state
+     The URL is a contract: #c=<name>&view=<id>&sort=<key>.<a|d>, defaults
+     omitted. pushState for contributor selection (a navigation act),
+     replaceState for refinements (sort, view). */
+  (function hashState() {
+    var applying = false;
+    function serialize() {
+      var parts = [];
+      if (openName) parts.push("c=" + encodeURIComponent(openName));
+      if (currentFieldView !== "spectrum") parts.push("view=" + currentFieldView);
+      if (!(state.key === "rank" && state.dir === 1)) {
+        parts.push("sort=" + state.key + "." + (state.dir === 1 ? "a" : "d"));
+      }
+      return parts.length ? "#" + parts.join("&") : "";
+    }
+    writeHash = function (push) {
+      if (applying) return;
+      var h = serialize();
+      var url = h || location.pathname + location.search;
+      if (push) history.pushState(null, "", url);
+      else history.replaceState(null, "", url);
+    };
+    onFieldViewChange = function (id) {
+      currentFieldView = id;
+      if (!applying) writeHash(false);
+    };
+    hashSetC = function (name) { // tap-to-pin: selection without expansion
+      if (!applying) {
+        history.replaceState(null, "",
+          "#c=" + encodeURIComponent(name));
+      }
+    };
+    function apply() {
+      var h = location.hash.replace(/^#/, "");
+      if (applying) return;
+      applying = true;
+      try {
+        var params = {};
+        h.split("&").forEach(function (kv) {
+          var i = kv.indexOf("=");
+          if (i > 0) params[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1));
+        });
+        var view = params.view || "spectrum";
+        if (setFieldView && view !== currentFieldView &&
+            ["spectrum", "activity", "signals", "tiers"].indexOf(view) !== -1) {
+          setFieldView(view);
+        }
+        var sort = (params.sort || "rank.a").split(".");
+        var key = sort[0], dir = sort[1] === "d" ? -1 : 1;
+        if (key !== state.key || dir !== state.dir) {
+          state.key = key; state.dir = dir;
+          render();
+        }
+        if (params.c && byName[params.c]) {
+          if (openName !== params.c) jumpToAuthor(params.c);
+        } else if (openName) {
+          closeDetail();
+        }
+      } finally {
+        applying = false;
+      }
+    }
+    window.addEventListener("hashchange", apply);
+    window.addEventListener("popstate", apply);
+    // defer past all synchronous module init: the board's initial render()
+    // runs at the end of this file and would wipe a detail opened here
+    if (location.hash.length > 1) requestAnimationFrame(apply);
+  })();
 
   /* -------------------------------------------------- quote word-fill */
   (function quoteFill() {
@@ -1078,20 +1610,16 @@
       spans.forEach(function (s) { s.classList.add("lit"); });
       return;
     }
-    var done = false, ticking = false;
-    function update() {
+    var ticking = false;
+    function update() { // bidirectional scrub, matching the finale
       ticking = false;
-      if (done) return;
       var r = q.getBoundingClientRect();
       var vh = window.innerHeight;
+      if (r.top > vh || r.bottom < 0) return; // off-screen: nothing to do
       var t = (vh * 0.82 - r.top) / (vh * 0.5);
       t = Math.max(0, Math.min(1, t));
       var lit = Math.round(t * spans.length);
       spans.forEach(function (s, i) { s.classList.toggle("lit", i < lit); });
-      if (t >= 1) {
-        done = true;
-        window.removeEventListener("scroll", onScroll);
-      }
     }
     function onScroll() {
       if (!ticking) { ticking = true; requestAnimationFrame(update); }
@@ -1128,10 +1656,16 @@
     var io = new IntersectionObserver(function (entries) {
       entries.forEach(function (e) {
         if (!e.isIntersecting) return;
+        // already deep in view when the entry fires (fast scroll, anchor
+        // jump): appear near-instantly instead of making the reader wait
+        if (e.intersectionRatio > 0.9 ||
+            e.boundingClientRect.top < window.innerHeight * 0.55) {
+          e.target.classList.add("in-fast");
+        }
         fire(e.target);
         io.unobserve(e.target);
       });
-    }, { threshold: 0.2, rootMargin: "0px 0px -5% 0px" });
+    }, { threshold: 0.05 });
     els.forEach(function (n) { io.observe(n); });
     // safety net: content must never stay hidden if an observation is missed
     // (print, find-in-page, programmatic capture, exotic scrolling)
@@ -1155,6 +1689,65 @@
     window.addEventListener("scroll", function () {
       if (!ticking) { ticking = true; requestAnimationFrame(update); }
     }, { passive: true });
+    update();
+  })();
+
+  /* --------------------------------------------------------- arc parallax
+     two planes: arcs drift at 0.06, the hero content at 0.025 (NOT .formula —
+     it carries data-reveal, whose transform the reveal system owns) */
+  (function arcParallax() {
+    if (reducedMotion) return;
+    var arcs = document.querySelector(".hero-arcs");
+    var inner = document.querySelector(".hero-inner");
+    var hero = document.querySelector(".hero");
+    if (!arcs || !hero) return;
+    var ticking = false;
+    function update() {
+      ticking = false;
+      var y = window.scrollY;
+      if (y > hero.offsetHeight) return; // hero off-screen: leave it be
+      arcs.style.transform = "translateY(" + (y * 0.06).toFixed(1) + "px)";
+      if (inner) inner.style.transform = "translateY(" + (y * 0.025).toFixed(1) + "px)";
+    }
+    window.addEventListener("scroll", function () {
+      if (!ticking) { ticking = true; requestAnimationFrame(update); }
+    }, { passive: true });
+  })();
+
+  /* -------------------------------------------------------- finale scrub
+     The espresso arcs draw as the footer enters: the co-change graph
+     converging under "Signals, not verdicts" — the page's one big payoff.
+     Scrubbed both directions; per-arc stagger via --i (set at build). */
+  (function finaleScrub() {
+    var svg = document.querySelector(".espresso-arcs");
+    var foot = document.querySelector(".espresso");
+    if (!svg || !foot) return;
+    var paths = [].slice.call(svg.querySelectorAll("path"));
+    if (reducedMotion || !paths.length) return; // reduced-motion CSS pins them drawn
+    var ticking = false;
+    var inner = foot.querySelector(".espresso-inner");
+    function update() {
+      ticking = false;
+      var r = foot.getBoundingClientRect();
+      var vh = window.innerHeight;
+      if (r.top > vh || r.bottom < 0) return; // off-screen, nothing to scrub
+      var travel = Math.min(r.height, vh) * 0.85;
+      var raw = (vh - r.top) / travel;
+      paths.forEach(function (p, i) {
+        var t = Math.max(0, Math.min(1, raw - i * 0.005));
+        p.style.strokeDashoffset = (1 - t).toFixed(4);
+      });
+      if (inner) { // content rises to meet the converging arcs
+        inner.style.transform =
+          "translateY(" + ((1 - Math.min(raw, 1)) * 14).toFixed(1) + "px)";
+      }
+    }
+    window.addEventListener("scroll", function () {
+      if (!ticking) { ticking = true; requestAnimationFrame(update); }
+    }, { passive: true });
+    window.addEventListener("resize", function () {
+      if (!ticking) { ticking = true; requestAnimationFrame(update); }
+    });
     update();
   })();
 

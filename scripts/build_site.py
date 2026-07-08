@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import sys
 from collections import Counter
 from datetime import datetime, timezone
@@ -443,6 +444,14 @@ def render_html(payload: dict) -> str:
         f"review fetch {html.escape(meta['review_status'])}"
     )
 
+    # og:image wants an absolute URL (crawlers resolve nothing else reliably);
+    # SITE_URL env sets the host, otherwise fall back to a relative og.png so
+    # local/preview builds stay valid. The image itself is rendered separately
+    # (scripts/render_og.py / `make og`) — it is crawler-fetched, never a page
+    # resource load, so index.html stays self-contained.
+    site_url = os.environ.get("SITE_URL", "").rstrip("/")
+    og_image = f"{site_url}/og.png" if site_url else "og.png"
+
     out = template
     for marker, value in [
         ("<!--@INJECT:CSS-->", css),
@@ -451,6 +460,7 @@ def render_html(payload: dict) -> str:
         ("<!--@INJECT:EYEBROW-->", eyebrow),
         ("<!--@INJECT:FOOTER-->", footer),
         ("<!--@INJECT:ARCS-->", arcs),
+        ("<!--@INJECT:OGIMAGE-->", og_image),
     ]:
         if marker not in out:
             sys.exit(f"template.html is missing marker {marker}")

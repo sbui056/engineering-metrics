@@ -289,6 +289,14 @@ def test_rendered_page_keeps_the_honest_framing():
         assert sentence in page, f"missing content-integrity sentence: {sentence}"
 
 
+def test_rendered_page_social_meta():
+    page = render_html(build_payload(_frames()))
+    assert 'property="og:image"' in page
+    assert 'name="twitter:card" content="summary_large_image"' in page
+    # without SITE_URL the og:image falls back to a relative path
+    assert 'content="og.png"' in page or 'content="http' in page
+
+
 def test_rendered_page_field_and_links():
     page = render_html(build_payload(_frames()))
     assert 'role="radiogroup"' in page          # view switcher markup

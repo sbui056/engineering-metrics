@@ -9,6 +9,10 @@
 <meta property="og:title" content="Who does the codebase depend on?">
 <meta property="og:description" content="82 FastVideo contributors ranked by impact — what survived, what it's coupled to, and who trusts whom to review. Not commit counts.">
 <meta property="og:type" content="website">
+<meta property="og:image" content="<!--@INJECT:OGIMAGE-->">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23FCFCFC'/%3E%3Ccircle cx='10' cy='20' r='3' fill='%23EC9E74'/%3E%3Ccircle cx='17' cy='16' r='4' fill='%23CB5124'/%3E%3Ccircle cx='24' cy='11' r='5' fill='%2378290C'/%3E%3C/svg%3E">
 <title>Engineering Impact — FastVideo</title>
 <style>
@@ -52,25 +56,25 @@
 <section class="story" id="story" aria-label="The story of the score">
   <div class="story-grid">
     <aside class="story-rail" aria-hidden="false">
-      <div class="step" data-step="spectrum">
+      <div class="step" data-step="spectrum" data-ghost="82">
         <span class="n">01</span>
         <h3>The spectrum</h3>
         <p>Every contributor, placed by impact score. Stacked dots are exact ties —
           the tall column is the zero-review block.</p>
       </div>
-      <div class="step" data-step="activity">
+      <div class="step" data-step="activity" data-ghost="ρ=.79">
         <span class="n">02</span>
         <h3>The trap</h3>
         <p>If commit count measured impact, this would be a straight line.
           Raw activity is a <strong>rejected baseline</strong> — shown, never scored.</p>
       </div>
-      <div class="step" data-step="signals">
+      <div class="step" data-step="signals" data-ghost="×4">
         <span class="n">03</span>
         <h3>The signals</h3>
         <p>One signal at a time, each contributor at their percentile.
           No single signal is the score — watch the field reshuffle.</p>
       </div>
-      <div class="step" data-step="tiers">
+      <div class="step" data-step="tiers" data-ghost="49">
         <span class="n">04</span>
         <h3>The tiers</h3>
         <p>Scores within an indistinguishable epsilon share a tier.
@@ -97,20 +101,24 @@
       </div>
       <div class="field-stage"><div id="field-svg"></div></div>
       <figcaption class="field-caption">
-        <p data-view="spectrum">Every contributor, placed by impact score; stacked
-          dots are ties. The clusters are why ranks come in tiers —
-          <span class="nowrap">hover to inspect, click to jump.</span></p>
-        <p data-view="activity" hidden>Commit count (log scale) against the impact
-          score. Raw commit count and lines-of-code are <strong>rejected
-          baselines</strong> — shown only as a contrast, never scored. If activity
-          were a good proxy this would be a straight line; the labeled outliers
-          are why it isn't.</p>
-        <p data-view="signals" hidden>One signal at a time, each contributor placed
-          by their percentile within this repo. Switch signals and watch the field
-          reshuffle — the reshuffling is why no single signal is the score.</p>
-        <p data-view="tiers" hidden>Contributors gathered into rank tiers: scores
-          within an indistinguishable epsilon share a column, and within-tier
-          order is not meaningful. The tall column is the true-zero review block.</p>
+        <p data-view="spectrum"><strong class="claim">A thin head and a long
+          tail.</strong> Every contributor, placed by impact score; stacked dots
+          are ties. The clusters are why ranks come in tiers —
+          <span class="only-hover nowrap">hover to inspect, click to jump.</span><span
+          class="only-touch">tap a dot to pin it; open its table row for the full picture.</span></p>
+        <p data-view="activity" hidden><strong class="claim">If commit count
+          measured impact, this would be a straight line.</strong> Commit count
+          (log scale) against the impact score — raw activity is a
+          <strong>rejected baseline</strong>, shown only as a contrast. The
+          labeled outliers are why it stays rejected.</p>
+        <p data-view="signals" hidden><strong class="claim">No single signal is
+          the score.</strong> One signal at a time, each contributor placed by
+          their percentile within this repo. Switch signals and watch the field
+          reshuffle — the reshuffling is the argument.</p>
+        <p data-view="tiers" hidden><strong class="claim">Ranks come in tiers,
+          not places.</strong> Scores within an indistinguishable epsilon share
+          a column, and within-tier order is not meaningful. The tall column is
+          the true-zero review block.</p>
       </figcaption>
     </figure>
   </div>
