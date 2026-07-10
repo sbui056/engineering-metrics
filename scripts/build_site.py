@@ -14,6 +14,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import subprocess
 import sys
 from collections import Counter
 from datetime import datetime, timezone
@@ -237,6 +238,116 @@ def ownership_overlap(ownership_file: pd.DataFrame) -> tuple[list[str], dict[str
     return files_shared, per_author
 
 
+def num_words(n: int) -> str:
+    """Spell 0..99 for display copy ("Eighty-two people, …"); digits beyond."""
+    ones = ["zero", "one", "two", "three", "four", "five", "six", "seven",
+            "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen",
+            "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"]
+    tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy",
+            "eighty", "ninety"]
+    if n < 20:
+        return ones[n]
+    if n < 100:
+        return tens[n // 10] + (f"-{ones[n % 10]}" if n % 10 else "")
+    return str(n)
+
+
+def get_repo_url() -> str:
+    """The target repo's public URL, for the template's outbound links.
+
+    REPO_URL env overrides; otherwise read the clone's origin remote and
+    normalize (ssh -> https, strip .git). Empty string if neither resolves —
+    the template links then point at "#" rather than lying.
+    """
+    env = os.environ.get("REPO_URL", "").strip()
+    if env:
+        return env.rstrip("/")
+    try:
+        url = subprocess.run(
+            ["git", "-C", str(config.get_repo_path()), "remote", "get-url", "origin"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+    if url.startswith("git@"):
+        url = "https://" + url[4:].replace(":", "/", 1)
+    return url.removesuffix(".git").rstrip("/")
+
+
+def org_lens(
+    ownership_file: pd.DataFrame, coupling: pd.DataFrame, scored: pd.DataFrame
+) -> dict:
+    """Org-level rollup for the team view: concentration, hotspots, departure risk.
+
+    Sole-ownership uses the pipeline's shipped definition (is_orphan_risk &
+    is_blame_leader) so every number reconciles with the compare view — one
+    concept, one number, everywhere.
+    """
+    # concentration: cumulative surviving-line share over ALL scored
+    # contributors (zeros included — the site's population is "N contributors",
+    # so the Gini is too; holders-only would understate the skew)
+    lines = ownership_file.groupby("author_canonical")["blame_lines"].sum()
+    v = (
+        lines.reindex(scored["author_canonical"], fill_value=0)
+        .sort_values(ascending=False)
+        .to_numpy(dtype=float)
+    )
+    curve = [round(float(x), 4) for x in (v.cumsum() / v.sum())]
+    sv = np.sort(v)
+    n = len(sv)
+    gini = round(float((2 * np.arange(1, n + 1) - n - 1) @ sv / (n * sv.sum())), 3)
+
+    # single-owner hotspots by top-level directory (>=10 files, top 7)
+    by_dir = lambda s: s.str.split("/").str[0]  # noqa: E731
+    all_files = ownership_file[["file_path"]].drop_duplicates()
+    dir_files = by_dir(all_files["file_path"]).value_counts()
+    orphan_rows = ownership_file[
+        ownership_file["is_orphan_risk"] & ownership_file["is_blame_leader"]
+    ]
+    dir_orphans = by_dir(orphan_rows["file_path"].drop_duplicates()).value_counts()
+    hotspots = [
+        {"dir": d + "/", "files": int(dir_files[d]), "orphans": int(dir_orphans[d])}
+        for d in dir_orphans.index
+        if dir_files.get(d, 0) >= 10
+    ]
+    hotspots = sorted(hotspots, key=lambda h: -h["orphans"])[:7]
+
+    # departure risk per author: orphan files + their co-change centrality
+    # share, how many have no second contributor at all, and who stands
+    # nearest (the best-placed second contributor per file — honest, thin)
+    cen_total = float(coupling["centrality_score"].sum()) or 1.0
+    orph = orphan_rows[["file_path", "author_canonical"]].rename(
+        columns={"author_canonical": "owner"}
+    )
+    orph_cen = orph.merge(
+        coupling[["file_path", "centrality_score"]], on="file_path", how="left"
+    ).fillna({"centrality_score": 0.0})
+    seconds = (
+        ownership_file.merge(orph, on="file_path")
+        .query("author_canonical != owner")
+        .sort_values("blame_share", ascending=False)
+        .groupby("file_path")
+        .first()
+        .reset_index()
+    )
+    risk: dict[str, dict] = {}
+    for owner, grp in orph_cen.groupby("owner"):
+        top = grp.nlargest(3, "centrality_score")["file_path"].tolist()
+        sec = seconds[seconds["owner"] == owner]
+        nearest = [
+            {"name": name, "files": int(k)}
+            for name, k in sec["author_canonical"].value_counts().head(3).items()
+        ]
+        risk[owner] = {
+            "files": int(grp["file_path"].nunique()),
+            "cen_share": round(float(grp["centrality_score"].sum()) / cen_total, 4),
+            "no_second": int(grp["file_path"].nunique() - sec["file_path"].nunique()),
+            "top": top,
+            "nearest": nearest,
+        }
+    return {"curve": curve, "gini": gini, "hotspots": hotspots, "risk": risk}
+
+
 def scatter_labels(scored: pd.DataFrame, counts: pd.Series, n: int = SCATTER_LABELS_N) -> list[str]:
     """Label only the divergent cases — the rank-gap rule from the Streamlit chart."""
     d = scored.merge(
@@ -430,6 +541,7 @@ def build_payload(frames: dict[str, pd.DataFrame]) -> dict:
     return {
         "meta": {
             "repo": config.get_repo_path().name,
+            "repo_url": get_repo_url(),
             "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
             "window_start": str(window_start.date()),
             "window_end": str(window_end.date()),
@@ -446,6 +558,7 @@ def build_payload(frames: dict[str, pd.DataFrame]) -> dict:
         ],
         "authors": authors,
         "files_shared": files_shared,
+        "org": org_lens(ownership_file, coupling, scored),
         "field": {
             "w": FIELD_W, "h": FIELD_H, "m": FIELD_M, "r": FIELD_R,
             "x_ticks": [
@@ -494,6 +607,25 @@ def render_html(payload: dict) -> str:
     site_url = os.environ.get("SITE_URL", "").rstrip("/")
     og_image = f"{site_url}/og.png" if site_url else "og.png"
 
+    # repo-agnostic copy: the template never hardcodes the target repo, so a
+    # data refresh or a different --repo can't ship stale words
+    repo = html.escape(meta["repo"])
+    repo_url = html.escape(meta["repo_url"] or "#")
+    repo_full = html.escape(
+        "/".join(meta["repo_url"].rsplit("/", 2)[-2:]) if meta["repo_url"] else meta["repo"]
+    )
+    n_words = num_words(meta["n_authors"]).capitalize()
+    desc = (
+        f"Who does {repo} depend on? An engineering-impact leaderboard built "
+        "from code survival, ownership, co-change coupling, and review "
+        "leverage — not commit counts."
+    )
+    og_desc = (
+        f"{meta['n_authors']} {repo} contributors ranked by impact — what "
+        "survived, what it's coupled to, and who trusts whom to review. "
+        "Not commit counts."
+    )
+
     out = template
     for marker, value in [
         ("<!--@INJECT:CSS-->", css),
@@ -503,6 +635,13 @@ def render_html(payload: dict) -> str:
         ("<!--@INJECT:FOOTER-->", footer),
         ("<!--@INJECT:ARCS-->", arcs),
         ("<!--@INJECT:OGIMAGE-->", og_image),
+        ("<!--@INJECT:REPO-->", repo),
+        ("<!--@INJECT:REPOURL-->", repo_url),
+        ("<!--@INJECT:REPOFULL-->", repo_full),
+        ("<!--@INJECT:DESC-->", desc),
+        ("<!--@INJECT:OGDESC-->", og_desc),
+        ("<!--@INJECT:NWORDS-->", n_words),
+        ("<!--@INJECT:REPOSLUG-->", repo.lower()),
     ]:
         if marker not in out:
             sys.exit(f"template.html is missing marker {marker}")

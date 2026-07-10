@@ -184,6 +184,7 @@
   var compareGetPair = null;// set by compare; read by hashState.serialize (#cmp)
   var compareApply = null;  // set by compare; called by hashState on a #cmp deep-link
   var compareClose = null;  // set by compare; called by the global Escape handler
+  var orgSimSet = null;     // set by orgLens; row ⚠ badges preselect the sim through here
   // weight-mixer state (null = shipped scoring): {score, rank} maps by name.
   // mixScores additionally bends the spectrum view's x inside retarget().
   var mixLab = null;
@@ -1200,7 +1201,19 @@
     });
 
     var flags = el("td", "w-flags");
-    if (a.flags.bus_factor) flags.appendChild(el("span", "badge badge-warn", "⚠ bus-factor"));
+    if (a.flags.bus_factor) {
+      // the flag is an entry point, not decoration: it opens the departure
+      // simulator preselected on this author (stopPropagation like ↗ and ⇄)
+      var bf = el("button", "badge badge-warn badge-link", "⚠ bus-factor");
+      bf.type = "button";
+      bf.setAttribute("aria-label",
+        "Departure risk for " + a.name + " — see the team view");
+      bf.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        if (orgSimSet) orgSimSet(a.name);
+      });
+      flags.appendChild(bf);
+    }
     if (a.flags.review_imputed) {
       if (flags.firstChild) flags.appendChild(document.createTextNode(" "));
       flags.appendChild(el("span", "badge badge-mut", "◌ no review data"));
@@ -1794,6 +1807,171 @@
   function cssEscape(s) {
     return (window.CSS && CSS.escape) ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&");
   }
+
+  /* ------------------------------------------------------------- org lens
+     Per-person signals rolled up to the repository: a Lorenz-style
+     concentration card (the diagonal makes the Gini visible), single-owner
+     hotspot bars, and the three-beat departure simulator. Numbers reconcile
+     with compare mode by construction (same is_orphan_risk definition). */
+  (function orgLens() {
+    var ORG = D.org;
+    var host = document.getElementById("org-curve");
+    if (!ORG || !host) return;
+    var NS = "http://www.w3.org/2000/svg";
+    function svgEl(tag, attrs, cls, text) {
+      var n = document.createElementNS(NS, tag);
+      for (var k in attrs) n.setAttribute(k, attrs[k]);
+      if (cls) n.setAttribute("class", cls);
+      if (text !== undefined) n.textContent = text;
+      return n;
+    }
+    var WORDS = ["zero", "one", "two", "three", "four", "five", "six",
+                 "seven", "eight", "nine", "ten", "eleven", "twelve"];
+    function words(n) { return n < WORDS.length ? WORDS[n] : String(n); }
+    function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+    // --- Lorenz card: curve + equality diagonal + shaded gap
+    var curve = ORG.curve, n = curve.length;
+    var W = 560, H = 320, m = { t: 34, r: 34, b: 34, l: 34 };
+    var pw = W - m.l - m.r, ph = H - m.t - m.b;
+    var X = function (i) { return m.l + (i / (n - 1)) * pw; };
+    var Y = function (v) { return m.t + (1 - v) * ph; };
+    var kHalf = 0, k10 = Math.min(10, n);
+    while (kHalf < n && curve[kHalf] < 0.5) kHalf += 1;
+    kHalf += 1; // 1-based count of people to reach half
+    var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, role: "img" });
+    svg.setAttribute("aria-label",
+      cap(words(kHalf)) + " contributors hold half the surviving code; the top " +
+      k10 + " hold " + Math.round(curve[k10 - 1] * 100) +
+      "%. The dashed diagonal shows an evenly spread codebase.");
+    var pts = curve.map(function (v, i) {
+      return X(i).toFixed(1) + "," + Y(v).toFixed(1);
+    });
+    // shaded gap between the curve and the equality diagonal
+    var gap = "M " + pts.join(" L ") + " L " +
+      curve.map(function (_, i) {
+        var j = n - 1 - i;
+        return X(j).toFixed(1) + "," + Y((j + 1) / n).toFixed(1);
+      }).join(" L ") + " Z";
+    svg.appendChild(svgEl("line",
+      { x1: m.l, y1: Y(0), x2: W - m.r, y2: Y(0) }, "org-axis"));
+    svg.appendChild(svgEl("line",
+      { x1: m.l, y1: m.t, x2: m.l, y2: Y(0) }, "org-axis"));
+    svg.appendChild(svgEl("path", { d: gap }, "org-gap"));
+    svg.appendChild(svgEl("line",
+      { x1: m.l, y1: Y(0), x2: W - m.r, y2: m.t }, "org-diag"));
+    svg.appendChild(svgEl("polyline",
+      { points: pts.join(" "), fill: "none" }, "org-curve-line"));
+    [[1, "top 1 · "], [kHalf, "top " + words(kHalf) + " · "], [k10, "top " + k10 + " · "]]
+      .forEach(function (mk) {
+        var k = mk[0], x = X(k - 1), y = Y(curve[k - 1]);
+        svg.appendChild(svgEl("circle", { cx: x, cy: y, r: 4 }, "org-dot"));
+        svg.appendChild(svgEl("text", { x: x + 9, y: y - 2 }, "org-mark",
+          mk[1] + Math.round(curve[k - 1] * 100) + "%"));
+      });
+    svg.appendChild(svgEl("text",
+      { x: W - m.r, y: Y(0) + 18, "text-anchor": "end" }, "org-axlab",
+      "contributors, ranked by surviving lines →"));
+    svg.appendChild(svgEl("text",
+      { x: m.l - 6, y: m.t - 10 }, "org-axlab",
+      "↑ cumulative share of surviving code"));
+    svg.appendChild(svgEl("text",
+      { x: W - m.r - 8, y: m.t + 64, "text-anchor": "end" }, "org-diaglab",
+      "· · · an evenly spread codebase"));
+    host.appendChild(svg);
+    var headline = document.getElementById("org-headline");
+    headline.appendChild(document.createTextNode(cap(words(kHalf)) + " people hold "));
+    headline.appendChild(el("b", null, "over half"));
+    headline.appendChild(document.createTextNode(" the surviving code."));
+    document.getElementById("org-hsub").textContent =
+      "top " + k10 + " hold " + Math.round(curve[k10 - 1] * 100) + "% · Gini " +
+      ORG.gini.toFixed(2) + " across all " + n + " contributors";
+
+    // --- hotspot bars
+    var hotHost = document.getElementById("org-hotspots");
+    ORG.hotspots.forEach(function (h) {
+      var share = Math.round(h.orphans / h.files * 100);
+      var row = el("div", "hb");
+      row.appendChild(el("span", "hb-dir", h.dir));
+      var track = el("span", "hb-track");
+      var fill = el("span", "hb-fill");
+      fill.style.width = share + "%";
+      track.appendChild(fill);
+      row.appendChild(track);
+      var val = el("span", "hb-val", share + "% ");
+      val.appendChild(el("small", null, "(" + h.orphans + " of " + h.files + ")"));
+      row.appendChild(val);
+      hotHost.appendChild(row);
+    });
+
+    // --- departure simulator: three honest beats
+    var sel = document.getElementById("sim-select");
+    var readout = document.getElementById("sim-readout");
+    var names = Object.keys(ORG.risk).sort(function (a, b) {
+      return ORG.risk[b].files - ORG.risk[a].files;
+    });
+    names.forEach(function (name) {
+      var o = el("option", null, name);
+      o.value = name;
+      sel.appendChild(o);
+    });
+    function pctShare(p) { return p < 0.01 ? "<1%" : "~" + Math.round(p * 100) + "%"; }
+    function renderSim(name) {
+      var r = ORG.risk[name];
+      if (!r) return;
+      readout.textContent = "";
+      var b1 = el("p", "sim-beat1");
+      b1.appendChild(el("b", null, plural(r.files, "file")));
+      b1.appendChild(document.createTextNode(
+        " lose their only major owner — carrying "));
+      b1.appendChild(el("b", null, pctShare(r.cen_share)));
+      b1.appendChild(document.createTextNode(
+        " of the co-change graph's centrality. Most central: "));
+      var mono = el("span", "sim-mono");
+      mono.textContent = r.top.map(function (p2) {
+        return middleTruncate(p2, 38);
+      }).join(", ");
+      mono.title = r.top.join("\n");
+      b1.appendChild(mono);
+      b1.appendChild(document.createTextNode("."));
+      readout.appendChild(b1);
+      if (r.no_second > 0) {
+        readout.appendChild(el("p", "sim-beat2",
+          r.no_second + " of them have no other contributor at all."));
+      }
+      var b3 = el("p", "sim-beat3");
+      if (r.nearest.length) {
+        b3.appendChild(document.createTextNode("Nearest others: "));
+        r.nearest.forEach(function (s, i) {
+          if (i) b3.appendChild(document.createTextNode(", "));
+          b3.appendChild(el("b", null, s.name));
+          b3.appendChild(document.createTextNode(
+            i === 0 ? " (best-placed second on " + plural(s.files, "file") + ")"
+                    : " (" + s.files + ")"));
+        });
+        b3.appendChild(document.createTextNode(
+          " — though a typical second contributor holds just ~4% of the code. "));
+      } else {
+        b3.appendChild(document.createTextNode(
+          "No other contributor has touched any of these files. "));
+      }
+      var back = el("button", "pointer-link sim-back", "view their row →");
+      back.type = "button";
+      back.addEventListener("click", function () { jumpToAuthor(name); });
+      b3.appendChild(back);
+      readout.appendChild(b3);
+    }
+    sel.addEventListener("change", function () { renderSim(sel.value); });
+    if (names.length) { sel.value = names[0]; renderSim(names[0]); }
+
+    orgSimSet = function (name) { // row ⚠ badge entry point
+      if (!ORG.risk[name]) return;
+      sel.value = name;
+      renderSim(name);
+      document.getElementById("team").scrollIntoView(
+        { behavior: reducedMotion ? "auto" : "smooth", block: "start" });
+    };
+  })();
 
   /* ------------------------------------------------------------ hash state
      The URL is a contract: #c=<name>&view=<id>&sort=<key>.<a|d>, defaults

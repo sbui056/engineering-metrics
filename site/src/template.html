@@ -5,16 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="theme-color" content="#FCFCFC">
-<meta name="description" content="Who does FastVideo depend on? An engineering-impact leaderboard built from code survival, ownership, co-change coupling, and review leverage — not commit counts.">
+<meta name="description" content="<!--@INJECT:DESC-->">
 <meta property="og:title" content="Who does the codebase depend on?">
-<meta property="og:description" content="82 FastVideo contributors ranked by impact — what survived, what it's coupled to, and who trusts whom to review. Not commit counts.">
+<meta property="og:description" content="<!--@INJECT:OGDESC-->">
 <meta property="og:type" content="website">
 <meta property="og:image" content="<!--@INJECT:OGIMAGE-->">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23FCFCFC'/%3E%3Ccircle cx='10' cy='20' r='3' fill='%23EC9E74'/%3E%3Ccircle cx='17' cy='16' r='4' fill='%23CB5124'/%3E%3Ccircle cx='24' cy='11' r='5' fill='%2378290C'/%3E%3C/svg%3E">
-<title>Engineering Impact — FastVideo</title>
+<title>Engineering Impact — <!--@INJECT:REPO--></title>
 <style>
 <!--@INJECT:CSS-->
 </style>
@@ -24,21 +24,22 @@
 
 <nav class="nav" aria-label="Sections">
   <div class="nav-inner">
-    <a class="wordmark" href="#top">impact<span class="wordmark-sep">/</span>fastvideo</a>
+    <a class="wordmark" href="#top">impact<span class="wordmark-sep">/</span><!--@INJECT:REPOSLUG--></a>
     <div class="nav-links">
       <a href="#story">Story</a>
       <a href="#leaderboard">Leaderboard</a>
+      <a href="#team">Team</a>
       <a href="#method">Method</a>
     </div>
-    <a class="nav-pill" href="https://github.com/hao-ai-lab/FastVideo" target="_blank" rel="noopener noreferrer">FastVideo ↗</a>
+    <a class="nav-pill" href="<!--@INJECT:REPOURL-->" target="_blank" rel="noopener noreferrer"><!--@INJECT:REPO--> ↗</a>
   </div>
 </nav>
 
 <header class="hero" id="top">
   <svg class="hero-arcs" viewBox="0 0 1200 560" preserveAspectRatio="xMidYMax slice" aria-hidden="true"><!--@INJECT:ARCS--></svg>
   <div class="hero-inner">
-    <a class="announce" href="https://github.com/hao-ai-lab/FastVideo" target="_blank" rel="noopener noreferrer"
-       data-reveal>A live case study on&nbsp;<b>hao-ai-lab/FastVideo ↗</b></a>
+    <a class="announce" href="<!--@INJECT:REPOURL-->" target="_blank" rel="noopener noreferrer"
+       data-reveal>A live case study on&nbsp;<b><!--@INJECT:REPOFULL--> ↗</b></a>
     <h1 data-reveal style="--d:90ms">Who does the codebase <em>depend</em> on?</h1>
     <p class="hero-sub" data-reveal style="--d:180ms">Impact is the degree to which an engineer's work is
       <strong>depended on, trusted, and hard to replace</strong> — measured from what
@@ -126,7 +127,7 @@
             aria-label="Every contributor as a dot; the views reposition them">
       <div class="progress" id="story-progress" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
       <div class="cardhead">
-        <div class="t">Impact distribution — FastVideo
+        <div class="t">Impact distribution — <!--@INJECT:REPO-->
           <small id="hero-eyebrow"><!--@INJECT:EYEBROW--></small>
         </div>
         <div class="stat" id="field-stat"></div>
@@ -166,7 +167,7 @@
 
 <section class="section" id="leaderboard" aria-labelledby="leaderboard-h">
   <p class="eyebrow" data-reveal>The evidence</p>
-  <h2 id="leaderboard-h" data-reveal>Eighty-two people, four signals each.</h2>
+  <h2 id="leaderboard-h" data-reveal><!--@INJECT:NWORDS--> people, four signals each.</h2>
   <p class="section-sub" data-reveal>Signals, not verdicts. Contributors within an
     indistinguishable score epsilon share a tier — within-tier order is not meaningful.
     <span class="badge badge-warn" role="img" aria-label="bus-factor flag">⚠ bus-factor</span>
@@ -210,6 +211,43 @@
     (breadth, recency, consistency) that is deliberately kept out of the headline score.
     Disagree with equal weights?
     <a class="pointer-link" href="#mixer">Re-weight the score in the lab ↓</a></p>
+</section>
+
+<!-- the org lens: per-person signals rolled up to the repository. The sim's
+     interactive parts are built by app.js (orgLens); without JS the section
+     shows headings and copy only (charts and readout need the payload). -->
+<section class="section" id="team" aria-labelledby="team-h">
+  <p class="eyebrow" data-reveal>The team view</p>
+  <h2 id="team-h" data-reveal>Where the knowledge concentrates.</h2>
+  <p class="section-sub" data-reveal>The same signals, rolled up to the repository.
+    Concentration reads two ways at once — mastery and fragility — so none of this is
+    a verdict; it is the shape of the codebase's memory.</p>
+  <div class="org-grid">
+    <div class="card org-card" data-reveal>
+      <div id="org-curve"></div>
+      <p class="org-headline" id="org-headline"></p>
+      <p class="org-hsub" id="org-hsub"></p>
+    </div>
+    <div class="card org-card" data-reveal>
+      <h3 class="org-h3">Single-owner hotspots</h3>
+      <p class="org-h3sub">Share of files in each area with exactly one major owner.</p>
+      <div id="org-hotspots"></div>
+    </div>
+    <div class="card org-card org-sim" data-reveal>
+      <h3 class="org-h3">The departure question</h3>
+      <p class="org-h3sub">Pick a contributor: what would the codebase lose its only
+        major owner of?</p>
+      <div class="sim-head">
+        <label class="sim-if" for="sim-select">If</label>
+        <select id="sim-select" aria-label="Contributor to simulate departing"></select>
+        <span class="sim-if">left tomorrow —</span>
+      </div>
+      <div id="sim-readout" aria-live="polite"></div>
+      <p class="sim-guard">A thought experiment on surviving code, not a prediction —
+        people hand off, document, and rewrite.
+        <a class="pointer-link" href="#method">Read the limits in the method.</a></p>
+    </div>
+  </div>
 </section>
 
 <section class="quote" aria-label="Goodhart caveat">
@@ -306,7 +344,7 @@
       above. What is not measured: mentoring, design, incident response, and everything
       off-repo. This page makes zero network requests — no cookies, no analytics.</p>
     <div class="espresso-meta">
-      <span>impact/fastvideo</span>
+      <span>impact/<!--@INJECT:REPOSLUG--></span>
       <span id="footer-meta"><!--@INJECT:FOOTER--></span>
     </div>
   </div>

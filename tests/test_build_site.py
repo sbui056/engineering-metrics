@@ -171,6 +171,47 @@ def test_ownership_overlap_intersection():
     assert len(shared) == 1
 
 
+def test_template_is_repo_agnostic():
+    # the engine claim: a data refresh or a different --repo must never ship
+    # stale copy, so the template carries no target-repo literals
+    template = (Path(__file__).parent.parent / "site" / "src"
+                / "template.html").read_text(encoding="utf-8")
+    for literal in ("FastVideo", "fastvideo", "hao-ai-lab", "Eighty-two"):
+        assert literal not in template, f"hardcoded repo literal: {literal}"
+
+
+def test_org_lens_shape_and_consistency():
+    payload = build_payload(_frames())
+    org = payload["org"]
+    # curve: one point per scored contributor, monotone, ends at 1.0
+    assert len(org["curve"]) == 3
+    assert org["curve"] == sorted(org["curve"])
+    assert org["curve"][-1] == 1.0
+    # gini over ALL scored contributors (Carol's zero surviving lines included):
+    # lines [130, 20, 0] -> 0.578
+    assert org["gini"] == 0.578
+    # hotspots require >=10 files per dir; the fixture's src/ has 3
+    assert org["hotspots"] == []
+    # departure risk: only Alice owns an orphan file (src/a.py, no second
+    # contributor on record, centrality 0.02 of a 0.07 total)
+    assert set(org["risk"]) == {"Alice"}
+    a = org["risk"]["Alice"]
+    assert a["files"] == 1
+    assert a["no_second"] == 1
+    assert a["nearest"] == []
+    assert a["top"] == ["src/a.py"]
+    assert a["cen_share"] == round(0.02 / 0.07, 4)
+
+
+def test_org_risk_reconciles_with_compare_footprint():
+    # one concept, one number: the sim's sole-owned count must equal the
+    # compare view's owned.orphan for every author
+    payload = build_payload(_frames())
+    by = {a["name"]: a for a in payload["authors"]}
+    for name, r in payload["org"]["risk"].items():
+        assert r["files"] == by[name]["owned"]["orphan"]
+
+
 def test_tier_counts_sum_to_authors():
     payload = build_payload(_frames())
     assert sum(t["count"] for t in payload["tiers"]) == 3

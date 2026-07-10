@@ -724,6 +724,58 @@ tr.row.pulse { animation: row-pulse 0.9s var(--ease) 0.4s both; }
 .detail-actions button:hover { background: var(--card); color: var(--ink); }
 .detail-actions button.copied { color: var(--surv); border-color: var(--surv); }
 
+/* ------------------------------------------------------------- org lens */
+.org-grid { display: grid; grid-template-columns: 3fr 2fr; gap: 2rem; align-items: start; }
+.org-card { padding: 1.3rem 1.4rem 1.1rem; }
+.org-sim { grid-column: 1 / -1; padding-bottom: 1.3rem; }
+.org-h3 { font: 600 0.95rem var(--ui); margin: 0 0 0.2rem; color: var(--ink); }
+.org-h3sub { font: 400 0.8rem/1.5 var(--ui); color: var(--ink-3); margin: 0 0 0.9rem; }
+#org-curve svg { display: block; width: 100%; height: auto; }
+.org-axis { stroke: var(--hair-2); stroke-width: 1; }
+.org-gap { fill: rgba(232, 83, 42, 0.07); }
+.org-diag { stroke: rgba(26, 21, 18, 0.25); stroke-dasharray: 4 5; }
+.org-curve-line { stroke: #CB5124; stroke-width: 2.2; }
+.org-dot { fill: #CB5124; }
+.org-mark { font: 400 10.5px var(--mono); fill: var(--ink-2); }
+.org-axlab { font: 500 9.5px var(--mono); letter-spacing: 0.04em; fill: var(--ink-3); }
+.org-diaglab { font: 400 9.5px var(--mono); fill: var(--ink-3); }
+.org-headline { font: 600 1.15rem/1.4 var(--ui); color: var(--ink); margin: 0.9rem 0 0.15rem; }
+.org-headline b { color: var(--verm); }
+.org-hsub { font: 400 0.8rem var(--mono); color: var(--ink-3); margin: 0 0 0.4rem; }
+.hb { display: grid; grid-template-columns: 9.5rem 1fr auto; gap: 0.7rem; align-items: center; margin-bottom: 0.55rem; }
+.hb-dir { font: 500 0.78rem var(--mono); color: var(--ink-2); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hb-track { height: 8px; border-radius: 4px; background: var(--putty); overflow: hidden; display: block; }
+.hb-fill { display: block; height: 100%; border-radius: 4px; background: #A63C15; opacity: 0.75; }
+.hb-val { font: 400 0.75rem var(--mono); color: var(--ink-2); white-space: nowrap; }
+.hb-val small { color: var(--ink-3); }
+.sim-head { display: flex; align-items: center; gap: 0.55rem; margin: 0.2rem 0 0.9rem; flex-wrap: wrap; }
+.sim-if { font: 600 1.05rem var(--ui); color: var(--ink); }
+#sim-select {
+  font: 500 0.95rem var(--ui); color: var(--ink); background: var(--cream);
+  border: 1px solid var(--hair-2); border-radius: 10px; padding: 0.45rem 0.9rem;
+  cursor: pointer;
+}
+#sim-select:focus-visible { outline: 2px solid var(--verm); outline-offset: 2px; }
+.sim-beat1, .sim-beat3 { font: 400 0.95rem/1.6 var(--ui); color: var(--ink-2); margin: 0.35rem 0; }
+.sim-beat1 b, .sim-beat3 b { color: var(--ink); }
+.sim-beat2 { font: 500 1rem var(--ui); color: var(--verm); margin: 0.5rem 0; }
+.sim-mono { font: 400 0.82rem var(--mono); color: var(--ink-2); }
+.sim-back { all: unset; cursor: pointer; color: var(--link); font-weight: 500; white-space: nowrap; }
+.sim-back:hover { text-decoration: underline; }
+.sim-back:focus-visible { outline: 2px solid var(--verm); outline-offset: 2px; }
+.sim-guard {
+  font: 400 0.8rem/1.55 var(--ui); color: var(--ink-3);
+  margin: 0.9rem 0 0; border-top: 1px solid var(--hair); padding-top: 0.7rem;
+}
+/* the row flag as an entry point: keeps the badge look, gains button affordance */
+button.badge-link { border: none; font: inherit; cursor: pointer; }
+button.badge-link:hover { filter: brightness(0.96); }
+button.badge-link:focus-visible { outline: 2px solid var(--verm); outline-offset: 2px; }
+@media (max-width: 64rem) {
+  .org-grid { grid-template-columns: 1fr; gap: 1.2rem; }
+  .hb { grid-template-columns: 7rem 1fr auto; }
+}
+
 /* --------------------------------------------------------- compare mode */
 /* contextual ⇄, hover/focus-revealed like the name-cell GitHub ↗ link */
 .row-compare {
@@ -1158,8 +1210,15 @@ tr.detail.open .detail-clip { grid-template-rows: 1fr; }
   .board th.w-sig, .board td.sig { display: none; }
   .nav-inner { padding: 0 1rem; }
   .wordmark { display: none; } /* the announce pill names the repo below */
-  .nav-links { flex: 1; justify-content: flex-start; }
-  .nav-links a { padding: 0.35rem 0.5rem; font-size: 0.8125rem; }
+  .nav-links { flex: 1; justify-content: flex-start; gap: 0; }
+  .nav-links a { padding: 0.35rem 0.4rem; font-size: 0.8125rem; }
+  /* four links + pill fit 390px: tighter pill, never two lines */
+  .nav-pill { padding: 0.4rem 0.75rem; white-space: nowrap; }
+}
+@media (max-width: 24rem) {
+  /* small Androids: the pill duplicates the hero announce + footer repo
+     links, so it yields before the section links do */
+  .nav-pill { display: none; }
   .hero-inner { padding-top: 3rem; }
   h1 { font-size: clamp(2.3rem, 9.5vw, 3rem); }
   .hero-ctas { flex-wrap: wrap; }
@@ -1178,7 +1237,8 @@ tr.detail.open .detail-clip { grid-template-rows: 1fr; }
   .nav, .hero-ctas, .announce, .field-controls, .table-tools, .board-foot,
   .skip, .tooltip, .hero-arcs, .espresso-arcs,
   .crosshair, .proxy-dot, .mixer, .prologue,
-  .compare-tray, .compare-modal, .row-compare { display: none !important; }
+  .compare-tray, .compare-modal, .row-compare,
+  .sim-head, .sim-back { display: none !important; } /* org section prints; its controls don't */
   body { background: #fff; color: #000; }
   body::before { display: none; }
   .board-card, .card { box-shadow: none; }
