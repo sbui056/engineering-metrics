@@ -531,6 +531,9 @@ h2 {
 }
 .section-sub { max-width: 52rem; margin: 1rem 0 1.75rem; font-size: 0.9375rem; color: var(--ink-2); }
 .footnote { font-size: 0.8125rem; color: var(--ink-3); max-width: 52rem; padding-bottom: 5rem; margin-top: 1rem; }
+/* contextual pointers to the buried features (compare, the mixer lab) */
+.pointer-link { color: var(--link); font-weight: 500; text-decoration: none; white-space: nowrap; }
+.pointer-link:hover { text-decoration: underline; }
 
 /* ----------------------------------------------------------------- table */
 .table-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem 1rem; margin-bottom: 1rem; }
@@ -727,7 +730,9 @@ tr.row.pulse { animation: row-pulse 0.9s var(--ease) 0.4s both; }
   all: unset; cursor: pointer; float: right;
   width: 1.6rem; height: 1.6rem; line-height: 1.6rem; text-align: center;
   border-radius: 50%; color: var(--ink-3); font-size: 0.9rem;
-  opacity: 0; transition: opacity var(--swift), background-color var(--swift), color var(--swift);
+  /* faintly present at rest so the feature is scannable, full on hover/focus
+     (it was opacity 0 — literally undiscoverable without hovering a row) */
+  opacity: 0.35; transition: opacity var(--swift), background-color var(--swift), color var(--swift);
 }
 tr.row:hover .row-compare, tr.row:focus-within .row-compare,
 .row-compare:focus-visible, .row-compare[aria-pressed="true"] { opacity: 1; }
@@ -1137,8 +1142,12 @@ tr.detail.open .detail-clip { grid-template-rows: 1fr; }
   .story-grid { grid-template-columns: minmax(0, 1fr); padding-top: 3rem; }
   .story-rail { display: flex; flex-wrap: wrap; gap: 0 1.5rem; }
   .story-rail .progress { width: 100%; }
-  .story-rail .step { flex: 1 1 16rem; border-top: none; padding-top: 0.4rem; }
+  .story-rail .step { flex: 1 1 16rem; border-top: none; padding: 0.4rem 0 0.8rem; }
   .step::before { display: none; } /* ghosts collide in the horizontal rail */
+  /* compact overture: on phones the steps precede the card, so they read as
+     a quick numbered summary — the card's own captions carry the detail */
+  .story-rail .step h3 { font-size: 1rem; margin: 0.15rem 0 0.25rem; }
+  .story-rail .step p { font-size: 0.8125rem; line-height: 1.5; }
   .cardhead { flex-direction: column-reverse; } /* stat first on small (ww mobile) */
   .stat { text-align: left; }
   .cells { grid-template-columns: 1fr 1fr; gap: 0 1.5rem; }
