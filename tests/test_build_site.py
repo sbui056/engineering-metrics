@@ -8,13 +8,13 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-from build_site import build_payload, render_html  # noqa: E402
+from build_site import build_payload, ownership_overlap, render_html  # noqa: E402
 
 UTC = "UTC"
 
 AUTHOR_KEYS = {
     "name", "rank", "tier", "impact", "signals", "flags", "rationale",
-    "aux", "review", "top_files", "commits", "sx", "weekly", "github", "views",
+    "aux", "review", "top_files", "owned", "commits", "sx", "weekly", "github", "views",
 }
 SIGNAL_KEYS = {
     "ownership_concentration", "code_survival_tenure_normalized",
@@ -131,6 +131,44 @@ def test_author_key_schema_exact():
         assert set(a["signals"].keys()) == SIGNAL_KEYS
         assert 0.0 <= a["impact"] <= 1.0
         assert all(0.0 <= v <= 1.0 for v in a["signals"].values())
+
+
+def test_owned_footprint_shape_and_counts():
+    payload = build_payload(_frames())
+    assert "files_shared" in payload
+    by = {a["name"]: a for a in payload["authors"]}
+    # fixture files each have a single major owner -> nothing shared
+    assert payload["files_shared"] == []
+    # Alice majors src/a.py (orphan) + src/b.py -> total 2, orphan 1
+    assert by["Alice"]["owned"] == {"total": 2, "orphan": 1, "shared": []}
+    # Bob majors src/c.py (not orphan)
+    assert by["Bob"]["owned"] == {"total": 1, "orphan": 0, "shared": []}
+    # Carol owns nothing major -> default footprint
+    assert by["Carol"]["owned"] == {"total": 0, "orphan": 0, "shared": []}
+
+
+def test_ownership_overlap_intersection():
+    # f1 is co-owned by two majors (the shared surface); f2/f3 are sole-owned
+    of = pd.DataFrame(
+        {
+            "file_path": ["f1", "f1", "f2", "f3"],
+            "author_canonical": ["Alice", "Bob", "Alice", "Bob"],
+            "blame_lines": [50, 40, 90, 30],
+            "blame_share": [0.5, 0.4, 0.9, 0.7],
+            "is_blame_leader": [True, False, True, True],
+            "is_major_owner": [True, True, True, True],
+            "top_owner_proportion": [0.5, 0.4, 0.9, 0.7],
+            "minor_contributor_count": [1, 1, 0, 0],
+            "is_orphan_risk": [False, False, True, True],
+        }
+    )
+    files_shared, owned = ownership_overlap(of)
+    assert files_shared == ["f1"]  # only the >=2-major file enters the dict
+    assert owned["Alice"] == {"total": 2, "orphan": 1, "shared": [0]}
+    assert owned["Bob"] == {"total": 2, "orphan": 1, "shared": [0]}
+    # a pairwise intersection reproduces the co-owned count
+    shared = set(owned["Alice"]["shared"]) & set(owned["Bob"]["shared"])
+    assert len(shared) == 1
 
 
 def test_tier_counts_sum_to_authors():

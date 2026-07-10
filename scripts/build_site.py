@@ -198,6 +198,45 @@ def top_owned_files(
     ]
 
 
+def ownership_overlap(ownership_file: pd.DataFrame) -> tuple[list[str], dict[str, dict]]:
+    """Per-author ownership footprint for the compare view.
+
+    - total: files where the author is a major owner (Bird's >=5% lens)
+    - orphan: files the author is the sole major owner of (bus-factor risk)
+    - shared: indices into the returned files_shared dict — the subset of the
+      author's major-owned files that at least one *other* major owner also
+      holds, so a pairwise set intersection reproduces the true co-owned count.
+      Sole-owned files can never overlap, so they're excluded from the dict to
+      keep the payload small (~25 KB here vs ~84 KB for every owned file).
+    """
+    major = ownership_file[ownership_file["is_major_owner"]]
+    # files owned by >=2 majors are the only ones that can be shared by a pair
+    file_owner_counts = major["file_path"].value_counts()
+    files_shared = sorted(file_owner_counts[file_owner_counts >= 2].index)
+    idx = {f: i for i, f in enumerate(files_shared)}
+
+    total_by = major.groupby("author_canonical").size()
+    orphan_rows = ownership_file[
+        ownership_file["is_orphan_risk"] & ownership_file["is_blame_leader"]
+    ]
+    orphan_by = orphan_rows.groupby("author_canonical").size()
+    multi = major[major["file_path"].isin(idx)]
+    shared_by = {
+        author: sorted(idx[f] for f in grp["file_path"])
+        for author, grp in multi.groupby("author_canonical")
+    }
+
+    per_author = {
+        author: {
+            "total": int(total_by.get(author, 0)),
+            "orphan": int(orphan_by.get(author, 0)),
+            "shared": shared_by.get(author, []),
+        }
+        for author in total_by.index
+    }
+    return files_shared, per_author
+
+
 def scatter_labels(scored: pd.DataFrame, counts: pd.Series, n: int = SCATTER_LABELS_N) -> list[str]:
     """Label only the divergent cases — the rank-gap rule from the Streamlit chart."""
     d = scored.merge(
@@ -292,6 +331,7 @@ def build_payload(frames: dict[str, pd.DataFrame]) -> dict:
 
     counts = commit_counts(commits)
     weekly, n_weeks = weekly_activity(commits)
+    files_shared, owned_by = ownership_overlap(ownership_file)
     reviews_by_author = {r.author_canonical: r for r in reviews.itertuples()}
     logins = github_logins(commits, reviews)
 
@@ -358,6 +398,7 @@ def build_payload(frames: dict[str, pd.DataFrame]) -> dict:
                     else None
                 ),
                 "top_files": top_owned_files(ownership_file, coupling, name),
+                "owned": owned_by.get(name, {"total": 0, "orphan": 0, "shared": []}),
                 "commits": n_commits,
                 "sx": round(float(np.log1p(n_commits)), 4),
                 "weekly": weekly.get(name, [0] * n_weeks),
@@ -404,6 +445,7 @@ def build_payload(frames: dict[str, pd.DataFrame]) -> dict:
             for key, label, short in SIGNAL_COLUMNS
         ],
         "authors": authors,
+        "files_shared": files_shared,
         "field": {
             "w": FIELD_W, "h": FIELD_H, "m": FIELD_M, "r": FIELD_R,
             "x_ticks": [

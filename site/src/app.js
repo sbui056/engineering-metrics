@@ -32,6 +32,37 @@
     return n;
   }
   function pctLabel(x) { return Math.round(x * 100) + "%"; }
+  function plural(n, word) { return n + " " + word + (n === 1 ? "" : "s"); }
+  function ordinal(n) {
+    var m100 = n % 100, m10 = n % 10;
+    if (m100 >= 11 && m100 <= 13) return n + "th";
+    return n + (m10 === 1 ? "st" : m10 === 2 ? "nd" : m10 === 3 ? "rd" : "th");
+  }
+
+  // one signal percentile bar, shared by the detail panel and the compare
+  // dialog. The caller sets --w from fill.dataset.w after insertion so the
+  // grow animation runs on open; reduced motion fills immediately. opts.lead
+  // appends a neutral "leads" tag (compare marks where each side is higher —
+  // never a winner: "signals, not verdicts").
+  function signalBar(a, s, opts) {
+    opts = opts || {};
+    var imputed = s.key === "review_leverage" && a.flags.review_imputed;
+    var bar = el("div", "dbar");
+    var lbl = el("span", "lbl", (opts.short && s.short ? s.short : s.label) + " ");
+    if (imputed) lbl.appendChild(el("small", null, "median-imputed"));
+    var track = el("div", "track");
+    var fill = el("div", "fill" + (imputed ? " imputed" : ""));
+    fill.style.setProperty("--sig-color", SIG_COLORS[s.key]);
+    if (!imputed) fill.style.background = SIG_COLORS[s.key];
+    fill.dataset.w = (a.signals[s.key] * 100).toFixed(1) + "%";
+    if (reducedMotion) fill.style.setProperty("--w", fill.dataset.w);
+    track.appendChild(fill);
+    bar.appendChild(lbl);
+    bar.appendChild(track);
+    bar.appendChild(el("span", "val", pctLabel(a.signals[s.key])));
+    if (opts.lead) bar.appendChild(el("span", "leads", "leads"));
+    return bar;
+  }
 
   /* ---------------------------------------------------------- tooltip */
   var tip = document.getElementById("tooltip");
@@ -146,6 +177,17 @@
   var setFieldView = null;  // set by the field; used by hash-state routing
   var hashSetC = null;      // set by the hash module; used by tap-to-pin
   var onFieldViewChange = null; // set by the hash module; called from setView
+  var fieldRetarget = null; // set by the field; used by the weight-mixer lab
+  var fieldGravity = null;  // set by the field; the "gravity" easter-egg toggle
+  var compareToggle = null; // set by compare; used by buildRow's ⇄ button
+  var compareHas = null;    // set by compare; buildRow marks selected rows
+  var compareGetPair = null;// set by compare; read by hashState.serialize (#cmp)
+  var compareApply = null;  // set by compare; called by hashState on a #cmp deep-link
+  var compareClose = null;  // set by compare; called by the global Escape handler
+  // weight-mixer state (null = shipped scoring): {score, rank} maps by name.
+  // mixScores additionally bends the spectrum view's x inside retarget().
+  var mixLab = null;
+  var mixScores = null;
   (function field() {
     var NS = "http://www.w3.org/2000/svg";
     var F = D.field;
@@ -175,7 +217,7 @@
 
     var svg = document.createElementNS(NS, "svg");
     svg.setAttribute("viewBox", "0 0 " + W + " " + H);
-    svg.setAttribute("role", "img");
+    svg.setAttribute("role", "group"); // not "img": it contains focusable dot targets
     svg.setAttribute("aria-label",
       "Every contributor as a dot. The leaderboard table carries the same data.");
 
@@ -293,8 +335,8 @@
       var hit = svgEl("circle", // roving tabindex: only rank 1 is a tab stop
         { r: 10, cx: 0, cy: 0, tabindex: ai === 0 ? 0 : -1, role: "button" }, "dot-hit");
       hit.setAttribute("aria-label",
-        a.name + " — impact " + a.impact.toFixed(3) + ", " + a.commits +
-        " commits, rank " + a.rank + ", tier " + a.tier);
+        a.name + " — impact " + a.impact.toFixed(3) + ", " +
+        plural(a.commits, "commit") + ", rank " + a.rank + ", tier " + a.tier);
       g.appendChild(dot); g.appendChild(hit);
       var p = { a: a, g: g, dot: dot, hit: hit, r: r, dim: false,
                 cx: PX(start[0]), cy: PY(0.5),
@@ -427,7 +469,7 @@
       own: SIGNALS[0], surv: SIGNALS[1], coup: SIGNALS[2], rev: SIGNALS[3]
     };
     function showPointTip(a, x, y) {
-      var line2 = a.commits + " commits · rank " + a.rank + " · tier " + a.tier;
+      var line2 = plural(a.commits, "commit") + " · rank " + a.rank + " · tier " + a.tier;
       if (state.view === "signals") {
         var s = VIEW_SIGNAL[state.signal];
         line2 = s.label + " " + pctLabel(a.signals[s.key]) + " · " + line2;
@@ -452,6 +494,7 @@
       lastT = now;
       var alive = false;
       points.forEach(function (p) {
+        if (gravityMode) { alive = gravityStep(p, dt) || alive; return; }
         var suffix = "";
         if (!p.settled) {
           if (now < p.wakeAt) {
@@ -505,10 +548,17 @@
       if (!anim) { lastT = performance.now(); anim = requestAnimationFrame(springFrame); }
     }
     function retarget(stagger) {
+      gravityMode = false; // any re-aim (view switch, mixer, restore) ends gravity
       var spec = VIEWS.filter(function (v) { return v.id === state.view; })[0];
+      // shipped annotations (median chip, rank callouts) are stale over a
+      // custom-weight distribution — hidden via CSS while the mix is bent
+      svg.classList.toggle("mix-bent", !!mixScores);
       var now = performance.now();
       points.forEach(function (p) {
         var c = spec.coords(p.a);
+        // the mixer lab bends spectrum x to the custom score (y-offset kept:
+        // approximate collision is fine for a what-if lens; springs carry it)
+        if (mixScores && state.view === "spectrum") c = [mixScores[p.a.name], c[1]];
         p.tx = PX(c[0]); p.ty = PY(c[1]);
         if (reducedMotion) { p.place(p.tx, p.ty); return; }
         p.settled = false;
@@ -516,6 +566,54 @@
       });
       if (!reducedMotion) wake();
     }
+
+    // --- "gravity" easter egg: type the word and every dot falls, piles on
+    // the baseline, and bounces; any view switch / Escape / a second "gravity"
+    // springs the whole field back into formation (retarget clears the flag,
+    // and the critically-damped springs carry the momentum home). Reuses the
+    // same points + rAF; honors reduced-motion by no-op.
+    var gravityMode = false;
+    var GRAV = 2000; // px/s^2 downward
+    function gravityStep(p, dt) {
+      p.vy += GRAV * dt;
+      p.cx += p.vx * dt;
+      p.cy += p.vy * dt;
+      var floor = PY(1) - p.r;
+      if (p.cy >= floor) {
+        p.cy = floor;
+        if (p.vy > 55) p.vy = -p.vy * 0.5; // bounce while it still has energy
+        else p.vy = 0;                     // otherwise settle onto the baseline
+        p.vx *= 0.8;
+        if (Math.abs(p.vx) < 3) p.vx = 0;
+      }
+      var lw = m.l + p.r, rw = W - m.r - p.r;
+      if (p.cx < lw) { p.cx = lw; p.vx = Math.abs(p.vx) * 0.55; }
+      else if (p.cx > rw) { p.cx = rw; p.vx = -Math.abs(p.vx) * 0.55; }
+      p.g.setAttribute("transform",
+        "translate(" + p.cx.toFixed(1) + " " + p.cy.toFixed(1) + ")");
+      return p.vx !== 0 || p.vy !== 0 || p.cy < floor - 0.5;
+    }
+    function toggleGravity() {
+      if (reducedMotion) return;             // the egg is pure motion; honor the setting
+      if (gravityMode) { retarget(); return; } // second trigger: spring back home
+      gravityMode = true;
+      fActive = false;                        // drop the loupe
+      crossG.setAttribute("display", "none"); // and the crosshair
+      var box = svg.getBoundingClientRect();  // pull the field into view if it's off-screen
+      if (box.bottom < 40 || box.top > window.innerHeight - 40) {
+        document.getElementById("field").scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      points.forEach(function (p) {
+        p.settled = false;
+        p.vx = (Math.random() - 0.5) * 300;   // scatter sideways
+        p.vy = -Math.random() * 80;           // with a small upward pop
+        p.wakeAt = 0;
+      });
+      wake();
+    }
+    toggleGravity.isOn = function () { return gravityMode; };
+    toggleGravity.off = function () { if (gravityMode) retarget(); };
+    fieldGravity = toggleGravity;
 
     // --- nearest-point pointer layer (skips dimmed dots; focus never does)
     var hotPoint = null;
@@ -549,7 +647,9 @@
       chH.setAttribute("y1", sy); chH.setAttribute("y2", sy);
       var fr = (sx - m.l) / pw, label = "";
       if (state.view === "spectrum") label = "impact " + fr.toFixed(3);
-      else if (state.view === "signals") label = Math.round(fr * 100) + "th pct";
+      else if (state.view === "signals") label = ordinal(Math.round(fr * 100)) + " pct";
+      // activity carries impact on y (ny = 1 - impact in the precomputed layout)
+      else if (state.view === "activity") label = "impact " + (1 - (sy - m.t) / ph).toFixed(3);
       chTxt.textContent = label;
       if (label) {
         var flip = sx > m.l + pw * 0.8;
@@ -663,6 +763,17 @@
     }
 
     var signalHost = document.getElementById("field-signal");
+    // captions crossfade between views (the field morphs smoothly under them,
+    // so a hidden-attribute snap clashed). The template's hidden attributes
+    // only serve the no-JS render; JS strips them and drives a class instead.
+    var caps = document.querySelectorAll(".field-caption p");
+    function syncCaps(id) {
+      caps.forEach(function (cap) {
+        cap.hidden = false;
+        cap.classList.toggle("cap-on", cap.dataset.view === id);
+      });
+    }
+    syncCaps(state.view);
     function setView(id) {
       state.view = id;
       if (typeof onFieldViewChange === "function") onFieldViewChange(id);
@@ -671,9 +782,7 @@
       svg.querySelectorAll(".axis-layer").forEach(function (g) {
         g.classList.toggle("axis-hidden", g.dataset.view !== id);
       });
-      document.querySelectorAll(".field-caption p").forEach(function (cap) {
-        cap.hidden = cap.dataset.view !== id;
-      });
+      syncCaps(id);
       retarget();
       positionThumbs();
     }
@@ -722,10 +831,15 @@
     var chipHost = document.getElementById("field-filters");
     CHIPS.forEach(function (c) {
       c.count = AUTHORS.filter(c.test).length;
+      if (c.count === 0) return; // a filter that matches nobody is dead UI
       var b = el("button", "chip-toggle");
       b.type = "button";
       b.setAttribute("aria-pressed", "false");
-      if (c.glyph) b.appendChild(el("span", "warn-glyph", c.glyph + " "));
+      if (c.glyph) {
+        var gl = el("span", "warn-glyph", c.glyph + " ");
+        if (c.glyph === "◌") gl.classList.add("glyph-low"); // ◌ renders high of optical center
+        b.appendChild(gl);
+      }
       b.appendChild(document.createTextNode(c.label + " · " + c.count));
       b.addEventListener("click", function () {
         state.filters[c.id] = !state.filters[c.id];
@@ -836,11 +950,13 @@
       var dot = el("span", "pin-dot");
       dot.style.background = p.dot.getAttribute("fill");
       pinStrip.appendChild(dot);
-      var label = el("span");
+      // name over meta in one shrinkable column so long names ellipsize
+      // instead of wrapping the whole strip (390px audit finding)
+      var label = el("span", "pin-txt");
       label.appendChild(el("b", null, p.a.name));
-      pinStrip.appendChild(label);
-      pinStrip.appendChild(el("span", "pin-meta",
+      label.appendChild(el("span", "pin-meta",
         "T" + p.a.tier + " · " + p.a.impact.toFixed(3) + " · rank " + p.a.rank));
+      pinStrip.appendChild(label);
       var go = el("button", null, "view in table →");
       go.type = "button";
       go.addEventListener("click", function () { jumpToAuthor(p.a.name); });
@@ -897,9 +1013,37 @@
     })();
 
     setFieldView = setView; // hash-state routing drives the same code path
+    fieldRetarget = retarget; // the mixer lab re-aims the spectrum through here
 
-    // opening bloom: dots start on the axis line and swarm into place
-    retarget(true);
+    // opening bloom: dots start on the axis line and swarm into place —
+    // deferred to the card's first entry into the viewport so the swarm is
+    // actually witnessed (it used to fire on load with the card ~1900px below
+    // the fold and settle unseen). Story-driver safe: its IO only calls
+    // setView when the view changes, and step 01 is already "spectrum".
+    (function bloom() {
+      if (reducedMotion || !("IntersectionObserver" in window)) {
+        retarget(true); // places instantly under reduced motion
+        return;
+      }
+      var bloomed = false;
+      function fire(instant) {
+        if (bloomed) return;
+        bloomed = true;
+        io.disconnect();
+        retarget(true);
+        if (instant) { // settle in place, no flight
+          points.forEach(function (p) {
+            p.vx = 0; p.vy = 0; p.settled = true; p.place(p.tx, p.ty);
+          });
+        }
+      }
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) { if (e.isIntersecting) fire(false); });
+      }, { threshold: 0.25 });
+      io.observe(document.getElementById("field"));
+      // print guard: never print the parked mid-axis line
+      window.addEventListener("beforeprint", function () { fire(true); });
+    })();
   })();
 
   /* ----------------------------------------------------------- leaderboard */
@@ -953,6 +1097,9 @@
     if (key === "name") return function (a) { return a.name.toLowerCase(); };
     if (key === "impact") return function (a) { return a.impact; };
     if (key === "commits") return function (a) { return a.commits; };
+    // custom-weight scores from the mixer lab (rank fallback guards a
+    // hand-edited #sort=mix URL arriving before any slider has moved)
+    if (key === "mix") return function (a) { return mixLab ? mixLab.score[a.name] : -a.rank; };
     return function (a) { return a.signals[key]; };
   }
 
@@ -997,26 +1144,40 @@
 
   function buildRow(a) {
     var tr = el("tr", "row");
-    tr.tabIndex = 0;
     tr.dataset.name = a.name;
-    tr.setAttribute("aria-expanded", "false");
 
     if (seenRows[a.name] || !rowIO) tr.classList.add("seen");
-    var rank = el("td", "num", String(a.rank));
+    // under custom weights the rank and score cells show the lab's numbers;
+    // tier chips, badges, and details stay on the shipped scoring
+    var mixOn = state.key === "mix" && mixLab;
+    var rank = el("td", "num", String(mixOn ? mixLab.rank[a.name] : a.rank));
     var name = el("td", "name-cell");
     name.appendChild(el("span",
       "monogram" + (a.tier === 1 ? " t1" : ""), monogramText(a.name)));
+    // the disclosure control is a real button (aria-expanded is invalid on a
+    // plain-table row); its click bubbles to the row's toggle handler
+    var btn = el("button", "row-btn");
+    btn.type = "button";
+    btn.setAttribute("aria-expanded", "false");
     // search-match highlighting: substring wrapped in <mark>; the name enters
     // the DOM via text nodes only (never markup)
     var q = state.query.trim().toLowerCase();
     var at = q ? a.name.toLowerCase().indexOf(q) : -1;
     if (at >= 0) {
-      name.appendChild(document.createTextNode(a.name.slice(0, at)));
-      name.appendChild(el("mark", null, a.name.slice(at, at + q.length)));
-      name.appendChild(document.createTextNode(a.name.slice(at + q.length)));
+      btn.appendChild(document.createTextNode(a.name.slice(0, at)));
+      btn.appendChild(el("mark", null, a.name.slice(at, at + q.length)));
+      btn.appendChild(document.createTextNode(a.name.slice(at + q.length)));
     } else {
-      name.appendChild(document.createTextNode(a.name));
+      btn.appendChild(document.createTextNode(a.name));
     }
+    btn.addEventListener("keydown", function (ev) {
+      if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return;
+      ev.preventDefault();
+      var btns = Array.prototype.slice.call(body.querySelectorAll(".row-btn"));
+      var i = btns.indexOf(btn) + (ev.key === "ArrowDown" ? 1 : -1);
+      if (btns[i]) btns[i].focus();
+    });
+    name.appendChild(btn);
     name.appendChild(el("span", "tier-chip", "T" + a.tier));
     if (a.github) {
       var gh = el("a", "gh-link", "↗");
@@ -1028,7 +1189,7 @@
       name.appendChild(gh);
     }
     var impact = el("td", "w-impact");
-    impact.appendChild(microBar(a.impact, false, true));
+    impact.appendChild(microBar(mixOn ? mixLab.score[a.name] : a.impact, false, true));
     tr.appendChild(rank); tr.appendChild(name); tr.appendChild(impact);
 
     SIGNALS.forEach(function (s) {
@@ -1044,19 +1205,28 @@
       if (flags.firstChild) flags.appendChild(document.createTextNode(" "));
       flags.appendChild(el("span", "badge badge-mut", "◌ no review data"));
     }
+    // compare affordance: hover/focus-revealed ⇄; stopPropagation like the ↗
+    // link so it never toggles the row's detail
+    if (compareToggle) {
+      var on = compareHas && compareHas(a.name);
+      var cmp = el("button", "row-compare", "⇄");
+      cmp.type = "button";
+      cmp.dataset.name = a.name;
+      cmp.setAttribute("aria-label", (on ? "Remove " : "Add ") + a.name +
+        (on ? " from" : " to") + " comparison");
+      cmp.setAttribute("aria-pressed", on ? "true" : "false");
+      if (on) tr.classList.add("comparing");
+      cmp.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        compareToggle(a.name);
+      });
+      flags.appendChild(cmp);
+    }
     tr.appendChild(flags);
 
+    // one toggle path: pointer clicks anywhere on the row and the button's
+    // native Enter/Space both land here by bubbling
     tr.addEventListener("click", function () { toggleDetail(tr, a); });
-    tr.addEventListener("keydown", function (ev) {
-      if (ev.target !== tr) return; // e.g. Enter on the GitHub anchor
-      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggleDetail(tr, a); }
-      if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
-        ev.preventDefault();
-        var rows = Array.prototype.slice.call(body.querySelectorAll("tr.row"));
-        var i = rows.indexOf(tr) + (ev.key === "ArrowDown" ? 1 : -1);
-        if (rows[i]) rows[i].focus();
-      }
-    });
     return tr;
   }
 
@@ -1186,6 +1356,15 @@
     });
   });
 
+  // tier-1 ring pulse fires once per visit: render() rebuilds rows, and a
+  // recreated monogram would restart the CSS animation without this latch
+  document.addEventListener("animationend", function (e) {
+    if (e.animationName !== "t1-pulse") return;
+    var card = document.querySelector(".board-card");
+    // rAF so the sibling ring's simultaneous animationend lands first
+    if (card) requestAnimationFrame(function () { card.classList.add("pulsed"); });
+  });
+
   /* the thesis toggle (State of JS steal): flip between impact rank and raw
      commit count and watch specific people physically trade places — the
      rejected baseline made felt. */
@@ -1213,6 +1392,11 @@
       return b;
     });
     tools.insertBefore(seg, tools.querySelector(".table-tools-note"));
+    // the mixer's modified state must never be ambient: a visible flag sits
+    // by the seg whenever custom weights own the order
+    var mixFlag = el("span", "mix-flag", "◈ custom weights — set in the method lab");
+    mixFlag.hidden = true;
+    tools.insertBefore(mixFlag, tools.querySelector(".table-tools-note"));
     function checkedIndex() {
       if (state.key === "rank" && state.dir === 1) return 0;
       if (state.key === "commits") return 1;
@@ -1220,6 +1404,7 @@
     }
     updateSeg = function () {
       var idx = checkedIndex();
+      mixFlag.hidden = state.key !== "mix";
       btns.forEach(function (b, i) {
         b.setAttribute("aria-checked", String(i === idx));
       });
@@ -1235,6 +1420,109 @@
     updateSeg();
   })();
 
+  /* ------------------------------------------------- weight-mixer lab
+     The "equal weights are a choice, not a calibration" caveat made
+     manipulable (Nicky Case): four sliders re-score all 82 as one dot
+     product on the shipped percentile components. The board FLIPs into a
+     custom sort mode, the spectrum bends its x, the lab lists its own top
+     five. Tiers, badges, and detail panels stay on the published scoring;
+     nothing here is serialized to the hash. */
+  (function weightMixer() {
+    var host = document.getElementById("mixer");
+    if (!host || !AUTHORS.length) return;
+    var rowsHost = document.getElementById("mixer-rows");
+    var topHost = document.getElementById("mix-top");
+    var SHORT = { ownership_concentration: "Ownership",
+                  code_survival_tenure_normalized: "Survival",
+                  coupling_criticality: "Coupling",
+                  review_leverage: "Reviews" };
+    var sliders = SIGNALS.map(function (s, i) {
+      var row = el("div", "mix-row");
+      var lab = el("label", "mix-lbl", SHORT[s.key] || s.label);
+      lab.htmlFor = "mix-" + i;
+      var input = document.createElement("input");
+      input.type = "range";
+      input.id = "mix-" + i;
+      input.min = "0"; input.max = "100"; input.step = "1"; input.value = "25";
+      input.style.accentColor = SIG_COLORS[s.key];
+      var val = el("span", "mix-val", "25%");
+      row.appendChild(lab); row.appendChild(input); row.appendChild(val);
+      rowsHost.appendChild(row);
+      return { input: input, val: val, key: s.key };
+    });
+    host.hidden = false;
+
+    function weights() { // effective mix: raw values normalized to sum 1
+      var raw = sliders.map(function (s) { return +s.input.value; });
+      var sum = raw.reduce(function (t, v) { return t + v; }, 0);
+      if (!sum) return [0.25, 0.25, 0.25, 0.25]; // all-zero = no opinion
+      return raw.map(function (v) { return v / sum; });
+    }
+    function recompute() {
+      var w = weights();
+      sliders.forEach(function (s, i) {
+        s.val.textContent = Math.round(w[i] * 100) + "%";
+      });
+      var scores = {};
+      AUTHORS.forEach(function (a) {
+        var t = 0;
+        sliders.forEach(function (s, i) { t += w[i] * a.signals[s.key]; });
+        scores[a.name] = t;
+      });
+      var order = AUTHORS.slice().sort(function (a, b) {
+        return scores[b.name] - scores[a.name] || a.rank - b.rank;
+      });
+      var ranks = {};
+      order.forEach(function (a, i) { ranks[a.name] = i + 1; });
+      mixLab = { score: scores, rank: ranks };
+      mixScores = scores;
+      topHost.textContent = "";
+      order.slice(0, 5).forEach(function (a) {
+        var li = el("li");
+        li.appendChild(el("b", null, a.name));
+        li.appendChild(el("span", "mix-score",
+          scores[a.name].toFixed(3) + " · shipped rank " + a.rank));
+        topHost.appendChild(li);
+      });
+    }
+    // continuous drags FLIP at most every 250ms (a re-render storm reads as
+    // thrash, not motion); the trailing call always lands the exact order
+    var lastFlip = 0, trailing = null;
+    function requestFlip() {
+      var wait = 250 - (Date.now() - lastFlip);
+      if (wait <= 0) {
+        lastFlip = Date.now();
+        flipRender();
+      } else if (!trailing) {
+        trailing = setTimeout(function () {
+          trailing = null;
+          lastFlip = Date.now();
+          flipRender();
+        }, wait);
+      }
+    }
+    function onInput() {
+      recompute();
+      if (state.key !== "mix") { state.key = "mix"; state.dir = -1; }
+      requestFlip();
+      if (fieldRetarget) fieldRetarget(); // springs are interruptible; every input may re-aim
+    }
+    sliders.forEach(function (s) { s.input.addEventListener("input", onInput); });
+    document.getElementById("mixer-reset").addEventListener("click", function () {
+      sliders.forEach(function (s) { s.input.value = "25"; s.val.textContent = "25%"; });
+      topHost.textContent = "";
+      mixLab = null;
+      mixScores = null;
+      if (trailing) { clearTimeout(trailing); trailing = null; }
+      if (state.key === "mix") {
+        state.key = "rank"; state.dir = 1;
+        flipRender();
+        writeHash(false);
+      }
+      if (fieldRetarget) fieldRetarget();
+    });
+  })();
+
   search.addEventListener("input", function () {
     state.query = search.value;
     render();
@@ -1242,7 +1530,7 @@
   // combobox-lite keys: Down into the rows, Esc clears / returns
   search.addEventListener("keydown", function (ev) {
     if (ev.key === "ArrowDown") {
-      var first = body.querySelector("tr.row");
+      var first = body.querySelector(".row-btn");
       if (first) { ev.preventDefault(); first.focus(); }
     } else if (ev.key === "Escape" && search.value) {
       ev.preventDefault();
@@ -1262,7 +1550,8 @@
     if (open) {
       open.classList.remove("open");
       var row = open.previousSibling;
-      if (row && row.classList) row.setAttribute("aria-expanded", "false");
+      var btn = row && row.querySelector && row.querySelector(".row-btn");
+      if (btn) btn.setAttribute("aria-expanded", "false");
     }
     if (openName !== null) { openName = null; writeHash(false); }
   }
@@ -1278,7 +1567,7 @@
     // force layout so the 0fr -> 1fr transition runs on first open
     void detail.offsetHeight;
     detail.classList.add("open");
-    tr.setAttribute("aria-expanded", "true");
+    tr.querySelector(".row-btn").setAttribute("aria-expanded", "true");
     if (highlightDot) highlightDot(a.name); // continuity: light the field dot
     openName = a.name;
     writeHash(true); // selection is a navigation act: pushState
@@ -1317,23 +1606,7 @@
     // left: signals + review reach + shown-not-scored context
     var left = el("div");
     left.appendChild(el("h4", "detail-h", "Signal percentiles"));
-    SIGNALS.forEach(function (s) {
-      var imputed = s.key === "review_leverage" && a.flags.review_imputed;
-      var bar = el("div", "dbar");
-      var lbl = el("span", "lbl", s.label + " ");
-      if (imputed) lbl.appendChild(el("small", null, "median-imputed"));
-      var track = el("div", "track");
-      var fill = el("div", "fill" + (imputed ? " imputed" : ""));
-      fill.style.setProperty("--sig-color", SIG_COLORS[s.key]);
-      if (!imputed) fill.style.background = SIG_COLORS[s.key];
-      fill.dataset.w = (a.signals[s.key] * 100).toFixed(1) + "%";
-      if (reducedMotion) fill.style.setProperty("--w", fill.dataset.w);
-      track.appendChild(fill);
-      bar.appendChild(lbl);
-      bar.appendChild(track);
-      bar.appendChild(el("span", "val", pctLabel(a.signals[s.key])));
-      left.appendChild(bar);
-    });
+    SIGNALS.forEach(function (s) { left.appendChild(signalBar(a, s)); });
 
     var rl = el("p", "review-line");
     if (a.review) {
@@ -1511,7 +1784,8 @@
     if (!row) return;
     toggleDetail(row, byName[name]);
     row.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
-    row.focus({ preventScroll: true });
+    var btn = row.querySelector(".row-btn");
+    if (btn) btn.focus({ preventScroll: true });
     if (!reducedMotion) {
       row.classList.add("pulse"); // lands as the proxy dot arrives
       setTimeout(function () { row.classList.remove("pulse"); }, 1600);
@@ -1531,9 +1805,13 @@
       var parts = [];
       if (openName) parts.push("c=" + encodeURIComponent(openName));
       if (currentFieldView !== "spectrum") parts.push("view=" + currentFieldView);
-      if (!(state.key === "rank" && state.dir === 1)) {
+      if (!(state.key === "rank" && state.dir === 1) && state.key !== "mix") {
+        // mixer weights aren't serialized, so a mix-sorted URL would be a
+        // broken contract — the hash stays about the published data
         parts.push("sort=" + state.key + "." + (state.dir === 1 ? "a" : "d"));
       }
+      var pair = compareGetPair && compareGetPair();
+      if (pair) parts.push("cmp=" + pair.map(encodeURIComponent).join(","));
       return parts.length ? "#" + parts.join("&") : "";
     }
     writeHash = function (push) {
@@ -1578,6 +1856,12 @@
           if (openName !== params.c) jumpToAuthor(params.c);
         } else if (openName) {
           closeDetail();
+        }
+        if (params.cmp && compareApply) {
+          var pr = params.cmp.split(",");
+          if (pr.length === 2) compareApply(pr[0], pr[1]);
+        } else if (compareClose) {
+          compareClose(); // no cmp in the hash (e.g. back button) -> ensure closed
         }
       } finally {
         applying = false;
@@ -1777,13 +2061,372 @@
     if (!state.showAll) { state.showAll = true; render(); }
   });
 
+  /* --------------------------------------------------- prologue: predict ρ
+     A non-blocking gut-check above the hero: the visitor scrubs a scatter from
+     a random cloud toward a straight line to guess how tightly commits track
+     impact, then reveals the real data (ρ = 0.79). Ships hidden without JS and
+     renders a static reveal under reduced motion. Self-contained: it never
+     touches the field engine. */
+  (function prologue() {
+    var root = document.getElementById("prologue");
+    if (!root || AUTHORS.length < 4) return;
+    var host = document.getElementById("prologue-svg");
+    var range = document.getElementById("prologue-range");
+    var revealBtn = document.getElementById("prologue-reveal");
+    var controls = root.querySelector(".prologue-controls");
+    var result = document.getElementById("prologue-result");
+    var readout = document.getElementById("prologue-readout");
+    if (!host || !range || !revealBtn || !controls || !result || !readout) return;
+
+    var NS = "http://www.w3.org/2000/svg";
+    var W = 640, H = 340, m = { t: 22, r: 22, b: 30, l: 30 };
+    var pw = W - m.l - m.r, ph = H - m.t - m.b;
+    var PX = function (x) { return m.l + x * pw; };
+    var PY = function (y) { return m.t + y * ph; };
+    var RHO = 0.79; // the shipped commits↔impact correlation (activity view)
+    var N = AUTHORS.length;
+    var RAMP = ["#EC9E74", "#DF7647", "#CB5124", "#A63C15", "#78290C"];
+    function rampColor(t) {
+      t = Math.max(0, Math.min(1, t)) * (RAMP.length - 1);
+      var i = Math.min(Math.floor(t), RAMP.length - 2), f = t - i;
+      function ch(hex, o) { return parseInt(hex.substr(o, 2), 16); }
+      var c = [1, 3, 5].map(function (o) {
+        return Math.round(ch(RAMP[i], o) + (ch(RAMP[i + 1], o) - ch(RAMP[i], o)) * f);
+      });
+      return "rgb(" + c.join(",") + ")";
+    }
+    function hash01(i) { return ((i * 2654435761) % 100003) / 100003; }
+
+    // real coords reused from the activity view (x = commits on a log axis,
+    // y = impact, both normalized 0..1). ry = a decorrelated shuffle of the
+    // impacts (the "random cloud" anchor); ly = a near-perfect line.
+    var pts = AUTHORS.map(function (a, i) {
+      return { a: a, x: a.views.activity[0], ty: a.views.activity[1],
+               imp: N > 1 ? 1 - (a.rank - 1) / (N - 1) : 1, i: i };
+    });
+    var tys = pts.map(function (p) { return p.ty; });
+    pts.map(function (_, i) { return i; })
+      .sort(function (x, y) { return hash01(x + 7) - hash01(y + 7); })
+      .forEach(function (src, k) { pts[k].ry = tys[src]; });
+    pts.forEach(function (p) {
+      p.ly = Math.max(0.04, Math.min(0.96, (1 - p.x) + (hash01(p.i + 3) - 0.5) * 0.07));
+    });
+
+    function svgEl(tag, attrs, cls) {
+      var n = document.createElementNS(NS, tag);
+      for (var k in attrs) n.setAttribute(k, attrs[k]);
+      if (cls) n.setAttribute("class", cls);
+      return n;
+    }
+    var svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    svg.setAttribute("aria-hidden", "true"); // the host carries the labelled summary
+    svg.appendChild(svgEl("line",
+      { x1: m.l, y1: PY(1), x2: W - m.r, y2: PY(1) }, "prologue-axis"));
+    svg.appendChild(svgEl("line",
+      { x1: m.l, y1: m.t, x2: m.l, y2: PY(1) }, "prologue-axis"));
+    var xlab = svgEl("text",
+      { x: W - m.r, y: PY(1) + 20, "text-anchor": "end" }, "prologue-axlab");
+    xlab.textContent = "more commits →";
+    svg.appendChild(xlab);
+    var ylab = svgEl("text",
+      { x: m.l - 4, y: m.t - 8, "text-anchor": "start" }, "prologue-axlab");
+    ylab.textContent = "↑ more impact";
+    svg.appendChild(ylab);
+    pts.forEach(function (p) {
+      var g = svgEl("g", {}, "prologue-dot");
+      var r = 2.6 + 3.4 * Math.pow(p.imp, 1.5);
+      g.appendChild(svgEl("circle", { r: r.toFixed(1), fill: rampColor(p.imp) }));
+      p.g = g;
+      svg.appendChild(g);
+    });
+    host.appendChild(svg);
+
+    function place(p, y) {
+      p.g.style.transform =
+        "translate(" + PX(p.x).toFixed(1) + "px," + PY(y).toFixed(1) + "px)";
+    }
+    function layout(g) {
+      pts.forEach(function (p) { place(p, g * p.ly + (1 - g) * p.ry); });
+    }
+
+    var revealed = false;
+    function reveal() {
+      if (revealed) return;
+      revealed = true;
+      var g = parseFloat(range.value);
+      // cascade to the truth, highest-impact dots landing first
+      pts.slice().sort(function (a, b) { return b.imp - a.imp; })
+        .forEach(function (p, k) {
+          p.g.style.transitionDelay = (k * 6) + "ms";
+          p.g.style.transitionDuration = "820ms";
+        });
+      pts.forEach(function (p) { place(p, p.ty); });
+      range.disabled = true;
+      controls.classList.add("done");
+      revealBtn.hidden = true;
+      readout.textContent =
+        "You guessed ρ ≈ " + g.toFixed(2) + ".  The real correlation is " + RHO.toFixed(2) + ".";
+      result.hidden = false;
+    }
+
+    root.hidden = false; // progressive enhancement: shown only once JS runs
+
+    if (reducedMotion) {
+      // static reveal — skip the guessing choreography entirely
+      controls.hidden = true;
+      revealBtn.hidden = true;
+      pts.forEach(function (p) { place(p, p.ty); });
+      readout.textContent =
+        "Commits and impact correlate at ρ = 0.79 — strong, but not a straight line.";
+      result.hidden = false;
+      return;
+    }
+
+    layout(parseFloat(range.value)); // initial positions before transitions arm
+    requestAnimationFrame(function () { host.classList.add("prologue-live"); });
+    range.addEventListener("input", function () {
+      if (!revealed) layout(parseFloat(range.value));
+    });
+    revealBtn.addEventListener("click", reveal);
+  })();
+
+  /* ------------------------------------------------------------- compare
+     Pin two contributors and hold them side by side. The dialog marks where
+     each *leads* a signal but never crowns a winner ("signals, not verdicts";
+     within-tier order is meaningless) and frames the synthesis around the
+     shared surface + bus-factor — the real "hard to replace" question. */
+  (function compare() {
+    var tray = document.getElementById("compare-tray");
+    var slotsEl = document.getElementById("compare-slots");
+    var openBtn = document.getElementById("compare-open");
+    var clearBtn = document.getElementById("compare-clear");
+    var modal = document.getElementById("compare");
+    var backdrop = document.getElementById("compare-backdrop");
+    var closeBtn = document.getElementById("compare-close");
+    var bodyEl = document.getElementById("compare-body");
+    if (!tray || !slotsEl || !openBtn || !modal || !bodyEl) return;
+
+    var FILES = D.files_shared || [];
+    var selected = [];      // up to two names
+    var dialogOpen = false;
+    var lastFocus = null;
+
+    function firstName(n) { return n.split(/\s+/)[0]; }
+    function baseName(p) { return p.split("/").pop(); }
+    function has(name) { return selected.indexOf(name) !== -1; }
+
+    function markRows() {
+      Array.prototype.forEach.call(document.querySelectorAll(".row-compare"),
+        function (b) {
+          var on = has(b.dataset.name);
+          b.setAttribute("aria-pressed", on ? "true" : "false");
+          var row = b.closest(".row");
+          if (row) row.classList.toggle("comparing", on);
+        });
+    }
+
+    function renderTray() {
+      slotsEl.textContent = "";
+      selected.forEach(function (name) {
+        var chip = el("span", "compare-chip");
+        chip.appendChild(el("span", "compare-chip-mono", monogramText(name)));
+        chip.appendChild(el("span", "compare-chip-name", name));
+        var x = el("button", "compare-chip-x", "✕");
+        x.type = "button";
+        x.setAttribute("aria-label", "Remove " + name);
+        x.addEventListener("click", function () { toggle(name); });
+        chip.appendChild(x);
+        slotsEl.appendChild(chip);
+      });
+      if (selected.length < 2) {
+        slotsEl.appendChild(el("span", "compare-slot-empty",
+          selected.length ? "pick one more" : "pick two contributors"));
+      }
+      openBtn.disabled = selected.length !== 2;
+      tray.hidden = selected.length === 0;
+    }
+
+    function toggle(name) {
+      if (!byName[name]) return;
+      var i = selected.indexOf(name);
+      if (i !== -1) selected.splice(i, 1);
+      else {
+        if (selected.length >= 2) selected.shift(); // keep the two most recent
+        selected.push(name);
+      }
+      renderTray();
+      markRows();
+      if (dialogOpen && selected.length === 2) fillDialog();
+      else if (dialogOpen) closeDialog();
+      writeHash(false);
+    }
+
+    function column(a, other) {
+      var col = el("div", "compare-col");
+      var head = el("div", "compare-col-head");
+      head.appendChild(el("span",
+        "monogram" + (a.tier === 1 ? " t1" : ""), monogramText(a.name)));
+      var meta = el("div", "compare-col-meta");
+      meta.appendChild(el("div", "compare-col-name", a.name));
+      meta.appendChild(el("div", "compare-col-sub",
+        "T" + a.tier + " · impact " + a.impact.toFixed(3) + " · rank " + a.rank));
+      head.appendChild(meta);
+      col.appendChild(head);
+      SIGNALS.forEach(function (s) {
+        var lead = a.signals[s.key] > other.signals[s.key] + 1e-9;
+        col.appendChild(signalBar(a, s, { lead: lead, short: true }));
+      });
+      var rl = el("p", "compare-review");
+      if (a.review) {
+        rl.appendChild(el("b", null, String(a.review.count)));
+        rl.appendChild(document.createTextNode(" reviews · " +
+          a.review.distinct_authors + " authors"));
+      } else {
+        rl.textContent = "no PR reviews on record";
+      }
+      col.appendChild(rl);
+      return col;
+    }
+
+    function intersect(x, y) {
+      var set = {}, all = [];
+      x.forEach(function (i) { set[i] = 1; });
+      y.forEach(function (i) { if (set[i]) all.push(i); });
+      // prefer real source files (in a subdir, not a root dotfile) as examples
+      var pref = all.filter(function (i) {
+        var f = FILES[i]; return f.indexOf("/") !== -1 && f.charAt(0) !== ".";
+      });
+      return { n: all.length, egs: (pref.length ? pref : all).slice(0, 3) };
+    }
+
+    function readout(a, b, shared) {
+      var parts = [];
+      if (a.tier === b.tier) parts.push("Same tier — the score gap between them is noise.");
+      var oa = a.owned.orphan, ob = b.owned.orphan;
+      if (!oa && !ob) {
+        parts.push("Neither is the sole owner of any file — low bus-factor either way.");
+      } else {
+        var hi = oa >= ob ? a : b, hn = Math.max(oa, ob), ln = Math.min(oa, ob);
+        parts.push(firstName(hi.name) + " is the sole major owner of " + hn + " files" +
+          (ln ? " to " + firstName((oa >= ob ? b : a).name) + "'s " + ln : "") +
+          " — the heavier bus-factor risk.");
+      }
+      if (shared) parts.push(shared + " co-owned files mean that surface isn't siloed.");
+      return parts.join(" ");
+    }
+
+    function synthesis(a, b) {
+      var wrap = el("div", "compare-synth");
+      wrap.appendChild(el("h3", "compare-synth-h", "Shared surface & bus-factor"));
+      var inter = intersect(a.owned.shared || [], b.owned.shared || []);
+      var line = el("p", "compare-synth-line");
+      line.appendChild(el("b", null, String(inter.n)));
+      line.appendChild(document.createTextNode(" files co-owned by both"));
+      if (inter.egs.length) {
+        line.appendChild(document.createTextNode(" · e.g. " +
+          inter.egs.map(function (i) { return baseName(FILES[i]); }).join(", ")));
+      }
+      wrap.appendChild(line);
+      var cols = el("div", "compare-synth-cols");
+      [a, b].forEach(function (p) {
+        var c = el("div", "compare-synth-col");
+        c.appendChild(el("b", null, String(p.owned.orphan)));
+        c.appendChild(document.createTextNode(" sole-owned by " + firstName(p.name)));
+        cols.appendChild(c);
+      });
+      wrap.appendChild(cols);
+      wrap.appendChild(el("p", "compare-readout", readout(a, b, inter.n)));
+      return wrap;
+    }
+
+    function fillDialog() {
+      var a = byName[selected[0]], b = byName[selected[1]];
+      if (!a || !b) return;
+      bodyEl.textContent = "";
+      var cols = el("div", "compare-cols");
+      cols.appendChild(column(a, b));
+      cols.appendChild(column(b, a));
+      bodyEl.appendChild(cols);
+      bodyEl.appendChild(synthesis(a, b));
+      // grow the bars from 0 (matches the detail panel's open animation)
+      bodyEl.querySelectorAll(".dbar .fill").forEach(function (f) {
+        if (f.dataset.w) f.style.setProperty("--w", f.dataset.w);
+      });
+    }
+
+    var FOCUSABLE = 'button, [href], input, [tabindex]:not([tabindex="-1"])';
+    function trap(ev) {
+      if (ev.key !== "Tab") return;
+      var f = modal.querySelectorAll(FOCUSABLE);
+      if (!f.length) return;
+      var first = f[0], last = f[f.length - 1];
+      if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
+      else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
+    }
+
+    function openDialog(push, invoker) {
+      if (selected.length !== 2) return;
+      // pass the invoker explicitly: WebKit doesn't focus a <button> on click,
+      // so document.activeElement would be <body> and focus wouldn't restore
+      lastFocus = invoker || document.activeElement;
+      fillDialog();
+      modal.hidden = false;
+      dialogOpen = true;
+      document.body.classList.add("compare-lock");
+      closeBtn.focus();
+      modal.addEventListener("keydown", trap);
+      if (push !== false) writeHash(true);
+    }
+    function closeDialog(silent) {
+      if (!dialogOpen) return;
+      dialogOpen = false;
+      modal.hidden = true;
+      modal.removeEventListener("keydown", trap);
+      document.body.classList.remove("compare-lock");
+      if (lastFocus && lastFocus.focus) lastFocus.focus();
+      if (!silent) writeHash(false);
+    }
+
+    openBtn.addEventListener("click", function () { openDialog(true, openBtn); });
+    clearBtn.addEventListener("click", function () {
+      selected = []; renderTray(); markRows();
+      if (dialogOpen) closeDialog(); else writeHash(false);
+    });
+    closeBtn.addEventListener("click", function () { closeDialog(); });
+    backdrop.addEventListener("click", function () { closeDialog(); });
+
+    compareToggle = toggle;
+    compareHas = has;
+    compareGetPair = function () {
+      return dialogOpen && selected.length === 2 ? selected.slice() : null;
+    };
+    compareApply = function (a, b) { // from a #cmp deep-link
+      if (!byName[a] || !byName[b] || a === b) return;
+      selected = [a, b];
+      renderTray(); markRows();
+      openDialog(false); // the hash is already the source of truth; don't re-push
+    };
+    compareClose = function () { return dialogOpen ? (closeDialog(), true) : false; };
+
+    renderTray();
+  })();
+
   /* ------------------------------------------------------- global keyboard */
+  var eggBuf = "";
   document.addEventListener("keydown", function (ev) {
     var typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+    // easter egg: type "gravity" anywhere outside a text field
+    if (!typing && ev.key && ev.key.length === 1) {
+      eggBuf = (eggBuf + ev.key.toLowerCase()).slice(-7);
+      if (eggBuf === "gravity" && fieldGravity) { eggBuf = ""; fieldGravity(); }
+    }
     if (ev.key === "/" && !typing) {
       ev.preventDefault();
       search.focus();
     } else if (ev.key === "Escape") {
+      if (compareClose && compareClose()) { return; } // modal first
+      if (fieldGravity && fieldGravity.isOn()) { fieldGravity.off(); tipHide(); return; }
       if (typing && search.value) {
         search.value = ""; state.query = ""; render();
       } else {
@@ -1794,4 +2437,10 @@
   });
 
   render();
+
+  // a small hidden delight for anyone poking around in the console
+  if (!reducedMotion) {
+    try { console.log("%c↯ psst — type “gravity”", "color:#CB5124;font-weight:600"); }
+    catch (e) { /* console-less environments */ }
+  }
 })();
