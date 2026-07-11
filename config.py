@@ -11,7 +11,9 @@ import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-DATA_DIR = ROOT / "data"
+# DATA_DIR env selects the dataset (one directory per analyzed repo, e.g.
+# DATA_DIR=data-comfyui); default stays the single-repo layout.
+DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data")).expanduser().resolve()
 CACHE_DIR = ROOT / ".cache"
 DEFAULT_REPO_PATH = ROOT / "target-repo" / "FastVideo"
 
@@ -56,6 +58,15 @@ def get_bot_extra() -> list[str]:
     baking them into source (e.g. set in a local, untracked .env).
     """
     return [p.strip() for p in os.environ.get("BOT_EXTRA", "").split(",") if p.strip()]
+
+
+def get_exclude_extra() -> list[str]:
+    """Extra excluded path segments/filenames from EXCLUDE_EXTRA (comma-separated).
+
+    Lets a target repo's vendored/generated locations (third_party/, generated/)
+    be filtered without baking repo-specific paths into source.
+    """
+    return [p.strip() for p in os.environ.get("EXCLUDE_EXTRA", "").split(",") if p.strip()]
 
 
 def ensure_dirs() -> None:

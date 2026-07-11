@@ -119,7 +119,7 @@ def activity_vs_impact(scored: pd.DataFrame, commits: pd.DataFrame) -> alt.Chart
 
 
 def main() -> None:
-    st.set_page_config(page_title="Engineering Impact — FastVideo",
+    st.set_page_config(page_title=f"Engineering Impact — {config.get_repo_path().name}",
                        page_icon="📐", layout="wide")
 
     scored = load("scored")

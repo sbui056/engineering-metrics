@@ -29,11 +29,18 @@ RS, US = "\x1e", "\x1f"  # record / field separators unlikely to appear in git d
 BOT_PATTERNS = (
     "[bot]", "dependabot", "renovate", "greenkeeper", "semantic-release",
     "github-actions", "actions-user", "web-flow",
+    # AI coding agents credited via Co-authored-by trailers are automation,
+    # not contributors. Email-precise patterns; bare model names would match
+    # humans (people are named Claude).
+    "noreply@anthropic.com", "noreply@openai.com", "noreply@google.com",
+    "copilot@", "chatgpt", "codex-connector", "coderabbit", "cursoragent",
 )
 _ALL_BOT_PATTERNS = tuple(BOT_PATTERNS) + tuple(p.lower() for p in config.get_bot_extra())
 
-# Excluded generated/vendored locations.
+# Excluded generated/vendored locations. EXCLUDE_EXTRA env (comma-separated
+# path segments/filenames) extends this per target repo, like BOT_EXTRA.
 EXCLUDED_DIR_SEGMENTS = {"dist", "build", "vendor", "node_modules", ".git", "__pycache__"}
+EXCLUDED_DIR_SEGMENTS |= set(config.get_exclude_extra())
 LOCKFILES = {
     "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock", "uv.lock",
     "Cargo.lock", "Gemfile.lock", "composer.lock", "go.sum", "Pipfile.lock",

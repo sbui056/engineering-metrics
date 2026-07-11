@@ -173,11 +173,68 @@ def test_ownership_overlap_intersection():
 
 def test_template_is_repo_agnostic():
     # the engine claim: a data refresh or a different --repo must never ship
-    # stale copy, so the template carries no target-repo literals
+    # stale copy or a stale CLAIM, so the template carries no target-repo
+    # literals and no data-derived numbers
     template = (Path(__file__).parent.parent / "site" / "src"
                 / "template.html").read_text(encoding="utf-8")
-    for literal in ("FastVideo", "fastvideo", "hao-ai-lab", "Eighty-two"):
-        assert literal not in template, f"hardcoded repo literal: {literal}"
+    for literal in ("FastVideo", "fastvideo", "hao-ai-lab", "Eighty-two",
+                    "William Lin", "Zhang Peiyuan", "0.79", "ρ=.79",
+                    "zero-review block"):
+        assert literal not in template, f"hardcoded repo literal/claim: {literal}"
+
+
+def test_appjs_is_repo_agnostic():
+    # data claims in the JS must come from the payload, never constants
+    js = (Path(__file__).parent.parent / "site" / "src"
+          / "app.js").read_text(encoding="utf-8")
+    for literal in ("0.79", "William Lin", "Zhang Peiyuan", "~4% of the code"):
+        assert literal not in js, f"hardcoded data claim in app.js: {literal}"
+
+
+def test_repo_data_consistency_guard(monkeypatch):
+    from build_site import check_repo_data_consistency
+    # DATA_DIR without REPO_PATH would build foreign data under the default
+    # repo's identity — the guard refuses
+    monkeypatch.setenv("DATA_DIR", "/tmp/data-other")
+    monkeypatch.delenv("REPO_PATH", raising=False)
+    import pytest as _pytest
+    with _pytest.raises(SystemExit):
+        check_repo_data_consistency()
+    # both set (or neither) passes
+    monkeypatch.setenv("REPO_PATH", "/tmp/other-repo")
+    check_repo_data_consistency()
+    monkeypatch.delenv("DATA_DIR")
+    monkeypatch.delenv("REPO_PATH")
+    check_repo_data_consistency()
+
+
+def test_siblings_cross_link(monkeypatch):
+    # unset -> no sibling markup at all; set -> lowercase impact/<name> links
+    monkeypatch.delenv("SIBLINGS", raising=False)
+    page = render_html(build_payload(_frames()))
+    assert 'class="nav-sib"' not in page  # (the CSS selector text is inlined)
+    monkeypatch.setenv("SIBLINGS", "ComfyUI=https://example.test/comfyui/")
+    page = render_html(build_payload(_frames()))
+    assert 'class="nav-sib" href="https://example.test/comfyui/"' in page
+    assert "impact/comfyui" in page
+
+
+def test_measured_claims_in_payload_and_render():
+    payload = build_payload(_frames())
+    # fixture commits [3,2,1] vs impact desc -> perfect rank correlation
+    assert payload["meta"]["rho"] == 1.0
+    # biggest exact tie is a single author -> no zero-review-block claim
+    assert payload["meta"]["zero_tie"] is False
+    # fixture has no second contributors on the orphan file
+    assert payload["org"]["median_second"] == 0.0
+    page = render_html(build_payload(_frames()))
+    # curated compare pair falls back to the top two when nothing is shared
+    assert "try it: Alice vs Bob →" in page
+    assert "#cmp=Alice,Bob" in page
+    # conditional copy renders the generic tie note, not the zero-review claim
+    assert "zero-review block" not in page
+    assert "largest tie group" in page
+    assert 'content="Who does' in page  # og:title injected
 
 
 def test_org_lens_shape_and_consistency():

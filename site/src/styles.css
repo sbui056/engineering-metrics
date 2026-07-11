@@ -238,7 +238,14 @@ html.js [data-reveal].in-fast { transition-duration: 0.18s; transition-delay: 0m
   text-decoration: none; letter-spacing: 0.01em;
 }
 .wordmark-sep { color: var(--verm); }
-.nav-links { display: flex; gap: 0.25rem; }
+.nav-links { display: flex; gap: 0.25rem; align-items: center; }
+/* sibling deployments of the same engine ("also: impact/<repo>") */
+.nav-sib-wrap {
+  font: 500 0.72rem var(--mono); color: var(--ink-3);
+  margin-left: 0.6rem; white-space: nowrap;
+}
+.nav-sib { color: var(--link); text-decoration: none; }
+.nav-sib:hover { text-decoration: underline; }
 .nav-links a {
   font-size: 0.875rem; color: var(--ink-2); text-decoration: none;
   padding: 0.4rem 0.8rem; border-radius: 99px;
@@ -1214,6 +1221,7 @@ tr.detail.open .detail-clip { grid-template-rows: 1fr; }
   .nav-links a { padding: 0.35rem 0.4rem; font-size: 0.8125rem; }
   /* four links + pill fit 390px: tighter pill, never two lines */
   .nav-pill { padding: 0.4rem 0.75rem; white-space: nowrap; }
+  .nav-sib-wrap { display: none; } /* cross-links live in the README on phones */
 }
 @media (max-width: 24rem) {
   /* small Androids: the pill duplicates the hero announce + footer repo

@@ -7,6 +7,12 @@ a rejected baseline, shown only as a contrast.
 
 ### ▶ [Explore the live dashboard](https://sbui056.github.io/engineering-metrics/)
 
+**Same engine, second repo:**
+[**impact/comfyui**](https://sbui056.github.io/engineering-metrics/comfyui/) — the analysis run
+against [Comfy-Org/ComfyUI](https://github.com/Comfy-Org/ComfyUI) (120k★). Two very different
+organizational shapes — a distributed research lab and a famously solo-led project — read by one
+pipeline: every number, chart, and sentence on both pages is derived from the target repo's data.
+
 [![Who does the codebase depend on?](docs/og.png)](https://sbui056.github.io/engineering-metrics/)
 
 Highlights worth clicking:
@@ -38,6 +44,8 @@ The full signal definitions, data contract, and scoring are documented in
 [docs/methodology.md](docs/methodology.md). The results on the target repository — the
 leaderboard, a measured contrast against the rejected commit-count and lines-of-code baselines,
 and the defense of the main design decisions — are in [docs/writeup.md](docs/writeup.md).
+What happens when the same engine reads two opposite org shapes — the distributed lab vs the
+solo-led project — is in [docs/comparison.md](docs/comparison.md).
 
 ## Running
 

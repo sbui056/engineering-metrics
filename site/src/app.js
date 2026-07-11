@@ -244,7 +244,9 @@
       });
       return "rgb(" + c.join(",") + ")";
     }
-    function dotRadius(pct) { return 4 + 4.8 * Math.pow(pct, 1.5); }
+    // radius tuned at N=82; the build scales it down for larger cohorts
+    var RSCALE = F.rscale || 1;
+    function dotRadius(pct) { return (4 + 4.8 * Math.pow(pct, 1.5)) * RSCALE; }
 
 
     // --- axis layers, one per view, prebuilt and crossfaded
@@ -1841,7 +1843,9 @@
     kHalf += 1; // 1-based count of people to reach half
     var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, role: "img" });
     svg.setAttribute("aria-label",
-      cap(words(kHalf)) + " contributors hold half the surviving code; the top " +
+      (kHalf === 1 ? "One contributor holds"
+                   : cap(words(kHalf)) + " contributors hold") +
+      " over half the surviving code; the top " +
       k10 + " hold " + Math.round(curve[k10 - 1] * 100) +
       "%. The dashed diagonal shows an evenly spread codebase.");
     var pts = curve.map(function (v, i) {
@@ -1862,11 +1866,18 @@
       { x1: m.l, y1: Y(0), x2: W - m.r, y2: m.t }, "org-diag"));
     svg.appendChild(svgEl("polyline",
       { points: pts.join(" "), fill: "none" }, "org-curve-line"));
+    // dedupe by k (on a solo-cliff repo, top-1 IS the half marker) and clamp
+    // labels inside the plot (the curve plateaus at the top edge)
+    var seen = {};
     [[1, "top 1 · "], [kHalf, "top " + words(kHalf) + " · "], [k10, "top " + k10 + " · "]]
       .forEach(function (mk) {
-        var k = mk[0], x = X(k - 1), y = Y(curve[k - 1]);
+        var k = mk[0];
+        if (seen[k]) return;
+        seen[k] = true;
+        var x = X(k - 1), y = Y(curve[k - 1]);
         svg.appendChild(svgEl("circle", { cx: x, cy: y, r: 4 }, "org-dot"));
-        svg.appendChild(svgEl("text", { x: x + 9, y: y - 2 }, "org-mark",
+        svg.appendChild(svgEl("text",
+          { x: x + 9, y: Math.max(m.t + 12, y - 2) }, "org-mark",
           mk[1] + Math.round(curve[k - 1] * 100) + "%"));
       });
     svg.appendChild(svgEl("text",
@@ -1880,7 +1891,8 @@
       "· · · an evenly spread codebase"));
     host.appendChild(svg);
     var headline = document.getElementById("org-headline");
-    headline.appendChild(document.createTextNode(cap(words(kHalf)) + " people hold "));
+    headline.appendChild(document.createTextNode(
+      kHalf === 1 ? "One person holds " : cap(words(kHalf)) + " people hold "));
     headline.appendChild(el("b", null, "over half"));
     headline.appendChild(document.createTextNode(" the surviving code."));
     document.getElementById("org-hsub").textContent =
@@ -1949,8 +1961,11 @@
             i === 0 ? " (best-placed second on " + plural(s.files, "file") + ")"
                     : " (" + s.files + ")"));
         });
-        b3.appendChild(document.createTextNode(
-          " — though a typical second contributor holds just ~4% of the code. "));
+        var med = (ORG.median_second || 0) * 100;
+        b3.appendChild(document.createTextNode(med > 0
+          ? " — though a typical second contributor holds just " +
+            (med < 1 ? "under 1%" : "~" + Math.round(med) + "%") + " of the code. "
+          : ". "));
       } else {
         b3.appendChild(document.createTextNode(
           "No other contributor has touched any of these files. "));
@@ -2242,7 +2257,7 @@
   /* --------------------------------------------------- prologue: predict ρ
      A non-blocking gut-check above the hero: the visitor scrubs a scatter from
      a random cloud toward a straight line to guess how tightly commits track
-     impact, then reveals the real data (ρ = 0.79). Ships hidden without JS and
+     impact, then reveals the real data (D.meta.rho). Ships hidden without JS and
      renders a static reveal under reduced motion. Self-contained: it never
      touches the field engine. */
   (function prologue() {
@@ -2261,7 +2276,7 @@
     var pw = W - m.l - m.r, ph = H - m.t - m.b;
     var PX = function (x) { return m.l + x * pw; };
     var PY = function (y) { return m.t + y * ph; };
-    var RHO = 0.79; // the shipped commits↔impact correlation (activity view)
+    var RHO = D.meta.rho; // measured commits↔impact Spearman, from the payload
     var N = AUTHORS.length;
     var RAMP = ["#EC9E74", "#DF7647", "#CB5124", "#A63C15", "#78290C"];
     function rampColor(t) {
@@ -2313,7 +2328,7 @@
     svg.appendChild(ylab);
     pts.forEach(function (p) {
       var g = svgEl("g", {}, "prologue-dot");
-      var r = 2.6 + 3.4 * Math.pow(p.imp, 1.5);
+      var r = (2.6 + 3.4 * Math.pow(p.imp, 1.5)) * (D.field.rscale || 1);
       g.appendChild(svgEl("circle", { r: r.toFixed(1), fill: rampColor(p.imp) }));
       p.g = g;
       svg.appendChild(g);
@@ -2356,7 +2371,8 @@
       revealBtn.hidden = true;
       pts.forEach(function (p) { place(p, p.ty); });
       readout.textContent =
-        "Commits and impact correlate at ρ = 0.79 — strong, but not a straight line.";
+        "Commits and impact correlate at ρ = " + RHO.toFixed(2) +
+        " — strong, but not a straight line.";
       result.hidden = false;
       return;
     }

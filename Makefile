@@ -1,6 +1,10 @@
 PYTHON ?= python
 REPO_PATH ?= target-repo/FastVideo
-DATA := data
+# One dataset directory per analyzed repo: DATA=data-<slug> make all
+DATA ?= data
+export DATA_DIR = $(abspath $(DATA))
+# build_site refuses DATA_DIR without REPO_PATH (identity/data mismatch guard)
+export REPO_PATH
 
 .PHONY: setup commits reviews coupling ownership score narrate validate site all clean
 
@@ -50,13 +54,26 @@ site: narrate
 # Builds with the public URL baked into og:image, renders the OG card, and
 # stages the single-file site into docs/. Then: git add docs && commit && push.
 PAGES_URL ?= https://sbui056.github.io/engineering-metrics
+# Sibling deployments cross-link in the nav ("also: impact/<name>").
+SIBLINGS ?= ComfyUI=$(PAGES_URL)/comfyui/
 deploy: narrate
-	SITE_URL=$(PAGES_URL) $(PYTHON) scripts/build_site.py
+	SITE_URL=$(PAGES_URL) SIBLINGS="$(SIBLINGS)" $(PYTHON) scripts/build_site.py
 	$(PYTHON) scripts/render_og.py
 	mkdir -p docs
 	cp dist/index.html docs/index.html
 	cp dist/og.png docs/og.png
 	touch docs/.nojekyll
+
+# Additional repos deploy beside the primary: docs/<slug>/ served at
+# $(PAGES_URL)/<slug>/. Usage:
+#   make deploy-site SLUG=comfyui DATA=data-comfyui REPO_PATH=target-repo/ComfyUI \
+#        SIBLINGS="FastVideo=$(PAGES_URL)/"
+deploy-site: narrate
+	SITE_URL=$(PAGES_URL)/$(SLUG) SIBLINGS="$(SIBLINGS)" $(PYTHON) scripts/build_site.py
+	$(PYTHON) scripts/render_og.py
+	mkdir -p docs/$(SLUG)
+	cp dist/index.html docs/$(SLUG)/index.html
+	cp dist/og.png docs/$(SLUG)/og.png
 
 # The one static OG image (crawler-fetched; not a page resource). Dev-only:
 # needs playwright. Set SITE_URL when building the site for absolute og:image.

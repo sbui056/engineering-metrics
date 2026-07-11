@@ -16,6 +16,7 @@ import json
 import os
 import subprocess
 import sys
+from urllib.parse import quote
 from collections import Counter
 from datetime import datetime, timezone
 from itertools import combinations
@@ -39,6 +40,9 @@ FRAMES = ["scored", "commits_clean", "reviews", "ownership_file", "coupling"]
 FIELD_W, FIELD_H = 920, 500
 FIELD_M = {"l": 56, "r": 20, "t": 18, "b": 44}
 FIELD_R = 4.5  # dot radius in viewBox units
+# The field's dot sizing was tuned at N=82; larger cohorts scale radius by
+# sqrt(N_BASE/N), clamped so dots never vanish (verified legible to ~N=350).
+FIELD_N_BASE = 82
 
 SIGNAL_COLUMNS = [
     ("ownership_concentration", "Ownership concentration", "Own"),
@@ -238,6 +242,34 @@ def ownership_overlap(ownership_file: pd.DataFrame) -> tuple[list[str], dict[str
     return files_shared, per_author
 
 
+def _zero_tie(scored: pd.DataFrame, reviewer_names: set[str]) -> bool:
+    """True iff the biggest exact-impact tie is the zero-review block (>=8).
+
+    "Zero-review" means the members gave no reviews (absent from the reviews
+    table) — NOT has_review_data, which is True for everyone once the fetch is
+    complete (true zeros are midranked, not imputed)."""
+    r6 = scored["impact_score"].round(6)
+    modal = r6.value_counts().idxmax()
+    grp = scored[r6 == modal]
+    return bool(
+        len(grp) >= 8
+        and not (set(grp["author_canonical"]) & reviewer_names)
+    )
+
+
+def curated_compare_pair(authors: list[dict]) -> tuple[str, str]:
+    """The compare example the leaderboard advertises: among the top 10 by
+    impact, the pair with the largest co-owned surface (falls back to the top
+    two). Data-picked so the link is alive on any repo."""
+    top = authors[: min(10, len(authors))]
+    best = (-1, top[0]["name"], top[1]["name"])
+    for a, b in combinations(top, 2):
+        sh = len(set(a["owned"]["shared"]) & set(b["owned"]["shared"]))
+        if sh > best[0]:
+            best = (sh, a["name"], b["name"])
+    return best[1], best[2]
+
+
 def num_words(n: int) -> str:
     """Spell 0..99 for display copy ("Eighty-two people, …"); digits beyond."""
     ones = ["zero", "one", "two", "three", "four", "five", "six", "seven",
@@ -250,6 +282,19 @@ def num_words(n: int) -> str:
     if n < 100:
         return tens[n // 10] + (f"-{ones[n % 10]}" if n % 10 else "")
     return str(n)
+
+
+def check_repo_data_consistency() -> None:
+    """Refuse the classic mismatch: a non-default DATA_DIR with a defaulted
+    REPO_PATH silently builds foreign data under the default repo's name
+    (title, links, og copy). Explicit beats implicit — require REPO_PATH
+    whenever DATA_DIR is overridden."""
+    if os.environ.get("DATA_DIR") and not os.environ.get("REPO_PATH"):
+        sys.exit(
+            "DATA_DIR is set but REPO_PATH is not — the site would carry the "
+            "default repo's identity over this dataset. Set REPO_PATH to the "
+            "clone this data was extracted from."
+        )
 
 
 def get_repo_url() -> str:
@@ -330,6 +375,11 @@ def org_lens(
         .first()
         .reset_index()
     )
+    # typical second-contributor share on sole-owned files (the sim's honesty
+    # clause) — measured, never hardcoded; 0.0 when no seconds exist
+    median_second = (
+        round(float(seconds["blame_share"].median()), 3) if len(seconds) else 0.0
+    )
     risk: dict[str, dict] = {}
     for owner, grp in orph_cen.groupby("owner"):
         top = grp.nlargest(3, "centrality_score")["file_path"].tolist()
@@ -345,7 +395,8 @@ def org_lens(
             "top": top,
             "nearest": nearest,
         }
-    return {"curve": curve, "gini": gini, "hotspots": hotspots, "risk": risk}
+    return {"curve": curve, "gini": gini, "hotspots": hotspots, "risk": risk,
+            "median_second": median_second}
 
 
 def scatter_labels(scored: pd.DataFrame, counts: pd.Series, n: int = SCATTER_LABELS_N) -> list[str]:
@@ -454,11 +505,15 @@ def build_payload(frames: dict[str, pd.DataFrame]) -> dict:
     sx_arr = np.log1p(author_commits.to_numpy(dtype=float))
     sx_max = round(float(np.log1p(max(counts.max(), X_TICK_VALUES[-1]))) * 1.04, 4)
     impact_arr = scored["impact_score"].to_numpy(dtype=float)
-    layouts = {"spectrum": beeswarm_layout(impact_arr, pw, ph)}
+    rscale = round(max(0.55, min(1.0, (FIELD_N_BASE / max(len(scored), 1)) ** 0.5)), 3)
+    r_eff = FIELD_R * rscale
+    layouts = {"spectrum": beeswarm_layout(impact_arr, pw, ph, r=r_eff)}
     for key, _, _ in SIGNAL_COLUMNS:
-        layouts[key] = beeswarm_layout(scored[key].to_numpy(dtype=float), pw, ph)
+        layouts[key] = beeswarm_layout(
+            scored[key].to_numpy(dtype=float), pw, ph, r=r_eff
+        )
     layouts["activity"] = np.column_stack([sx_arr / sx_max, 1.0 - impact_arr])
-    layouts["tiers"] = tier_layout(scored["tier"].to_numpy(), pw, ph)
+    layouts["tiers"] = tier_layout(scored["tier"].to_numpy(), pw, ph, r=r_eff)
     view_names = {
         "ownership_concentration": "own",
         "code_survival_tenure_normalized": "surv",
@@ -551,6 +606,16 @@ def build_payload(frames: dict[str, pd.DataFrame]) -> dict:
             "n_tiers": int(scored["tier"].max()),
             "n_commits": int(commits.loc[~commits["is_merge"], "commit_hash"].nunique()),
             "n_files": int(ownership_file["file_path"].nunique()),
+            # Spearman of commit count vs impact — the prologue's "real
+            # correlation" claim is measured, never hardcoded (rank-corr =
+            # Pearson on ranks; no scipy needed)
+            "rho": round(float(
+                author_commits.rank().corr(scored["impact_score"].rank())
+            ), 2),
+            # is the largest exact-score tie the zero-review block? Drives the
+            # story copy ("the tall column is the zero-review block") so the
+            # claim is only made where it is true.
+            "zero_tie": _zero_tie(scored, set(reviews_by_author)),
         },
         "signals": [
             {"key": key, "label": label, "short": short}
@@ -561,6 +626,7 @@ def build_payload(frames: dict[str, pd.DataFrame]) -> dict:
         "org": org_lens(ownership_file, coupling, scored),
         "field": {
             "w": FIELD_W, "h": FIELD_H, "m": FIELD_M, "r": FIELD_R,
+            "rscale": rscale,
             "x_ticks": [
                 {"v": v, "x": round(float(np.log1p(v)) / sx_max, 4)}
                 for v in X_TICK_VALUES
@@ -626,6 +692,35 @@ def render_html(payload: dict) -> str:
         "Not commit counts."
     )
 
+    # truthfulness injections: every data claim in the copy is measured
+    rho = meta["rho"]
+    rho_ghost = "ρ=" + f"{rho:.2f}".lstrip("0")
+    tienote1 = (" — the tall column is the zero-review block"
+                if meta["zero_tie"] else "")
+    tienote2 = ("The tall column is the true-zero review block."
+                if meta["zero_tie"]
+                else "The tallest column is the largest tie group.")
+    ca, cb = curated_compare_pair(payload["authors"])
+    cmp_link = (
+        f'<a class="pointer-link" href="#cmp={quote(ca)},{quote(cb)}">'
+        f"try it: {html.escape(ca)} vs {html.escape(cb)} →</a>"
+    )
+
+    # sibling deployments (SIBLINGS env: "Name=URL,Name=URL") cross-link the
+    # analyses; hidden entirely when unset so the engine stays generic
+    sib_parts = []
+    for pair in os.environ.get("SIBLINGS", "").split(","):
+        if "=" in pair:
+            name, sib_url = pair.split("=", 1)
+            sib_parts.append(
+                f'<a class="nav-sib" href="{html.escape(sib_url.strip())}">'
+                f"impact/{html.escape(name.strip().lower())}</a>"
+            )
+    siblings = (
+        '<span class="nav-sib-wrap">also: ' + " ".join(sib_parts) + "</span>"
+        if sib_parts else ""
+    )
+
     out = template
     for marker, value in [
         ("<!--@INJECT:CSS-->", css),
@@ -642,6 +737,14 @@ def render_html(payload: dict) -> str:
         ("<!--@INJECT:OGDESC-->", og_desc),
         ("<!--@INJECT:NWORDS-->", n_words),
         ("<!--@INJECT:REPOSLUG-->", repo.lower()),
+        ("<!--@INJECT:OGTITLE-->", f"Who does {repo} depend on?"),
+        ("<!--@INJECT:NAUTH-->", str(meta["n_authors"])),
+        ("<!--@INJECT:RHOGHOST-->", rho_ghost),
+        ("<!--@INJECT:NTIERS-->", str(meta["n_tiers"])),
+        ("<!--@INJECT:TIENOTE1-->", tienote1),
+        ("<!--@INJECT:TIENOTE2-->", tienote2),
+        ("<!--@INJECT:CMPLINK-->", cmp_link),
+        ("<!--@INJECT:SIBLINGS-->", siblings),
     ]:
         if marker not in out:
             sys.exit(f"template.html is missing marker {marker}")
@@ -650,6 +753,7 @@ def render_html(payload: dict) -> str:
 
 
 def main() -> None:
+    check_repo_data_consistency()
     frames = load_frames()
     payload = build_payload(frames)
     page = render_html(payload)

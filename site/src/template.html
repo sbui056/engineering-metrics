@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="light">
 <meta name="theme-color" content="#FCFCFC">
 <meta name="description" content="<!--@INJECT:DESC-->">
-<meta property="og:title" content="Who does the codebase depend on?">
+<meta property="og:title" content="<!--@INJECT:OGTITLE-->">
 <meta property="og:description" content="<!--@INJECT:OGDESC-->">
 <meta property="og:type" content="website">
 <meta property="og:image" content="<!--@INJECT:OGIMAGE-->">
@@ -30,6 +30,7 @@
       <a href="#leaderboard">Leaderboard</a>
       <a href="#team">Team</a>
       <a href="#method">Method</a>
+      <!--@INJECT:SIBLINGS-->
     </div>
     <a class="nav-pill" href="<!--@INJECT:REPOURL-->" target="_blank" rel="noopener noreferrer"><!--@INJECT:REPO--> ↗</a>
   </div>
@@ -81,8 +82,8 @@
       </div>
       <div class="prologue-result" id="prologue-result" hidden>
         <p class="prologue-readout" id="prologue-readout" aria-live="polite"></p>
-        <p class="prologue-verdict">Strong enough to mislead, not enough to rank by — the field is
-          tied at the top and scatters fast below. So this leaderboard ranks by what
+        <p class="prologue-verdict">Strong enough to mislead, not enough to rank by — the
+          outliers are the argument. So this leaderboard ranks by what
           <strong>survived</strong>, what it's <strong>coupled</strong> to, and who's
           <strong>trusted</strong> to review — never by commit count.</p>
         <a class="pill pill-ink" href="#leaderboard">See who the codebase depends on →</a>
@@ -95,13 +96,13 @@
   <h2 class="sr-only">How the score works</h2>
   <div class="story-grid">
     <aside class="story-rail" aria-hidden="false">
-      <div class="step" data-step="spectrum" data-ghost="82">
+      <div class="step" data-step="spectrum" data-ghost="<!--@INJECT:NAUTH-->">
         <span class="n">01</span>
         <h3>The spectrum</h3>
-        <p>Every contributor, placed by impact score. Stacked dots are exact ties —
-          the tall column is the zero-review block.</p>
+        <p>Every contributor, placed by impact score.
+          Stacked dots are exact ties<!--@INJECT:TIENOTE1-->.</p>
       </div>
-      <div class="step" data-step="activity" data-ghost="ρ=.79">
+      <div class="step" data-step="activity" data-ghost="<!--@INJECT:RHOGHOST-->">
         <span class="n">02</span>
         <h3>The trap</h3>
         <p>If commit count measured impact, this would be a straight line.
@@ -113,7 +114,7 @@
         <p>One signal at a time, each contributor at their percentile.
           No single signal is the score — watch the field reshuffle.</p>
       </div>
-      <div class="step" data-step="tiers" data-ghost="49">
+      <div class="step" data-step="tiers" data-ghost="<!--@INJECT:NTIERS-->">
         <span class="n">04</span>
         <h3>The tiers</h3>
         <p>Scores within an indistinguishable epsilon share a tier.
@@ -156,8 +157,8 @@
           reshuffle — the reshuffling is the argument.</p>
         <p data-view="tiers" hidden><strong class="claim">Ranks come in tiers,
           not places.</strong> Scores within an indistinguishable epsilon share
-          a column, and within-tier order is not meaningful. The tall column is
-          the true-zero review block.</p>
+          a column, and within-tier order is not meaningful.
+          <!--@INJECT:TIENOTE2--></p>
       </figcaption>
     </figure>
   </div>
@@ -173,9 +174,7 @@
     <span class="badge badge-warn" role="img" aria-label="bus-factor flag">⚠ bus-factor</span>
     marks the sole major owner of at least one file: the same concentration that makes
     someone hard to replace is an orphan risk, so it is scored positively <em>and</em> flagged.
-    Hold two people side by side with a row's ⇄ —
-    <a class="pointer-link" href="#cmp=William%20Lin,Zhang%20Peiyuan">try it: William Lin vs
-    Zhang Peiyuan →</a></p>
+    Hold two people side by side with a row's ⇄ — <!--@INJECT:CMPLINK--></p>
 
   <div class="table-tools" data-reveal>
     <div class="search-wrap">
