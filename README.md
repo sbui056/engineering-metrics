@@ -7,6 +7,10 @@ a rejected baseline, shown only as a contrast.
 
 ### ▶ [Explore the live dashboard](https://sbui056.github.io/engineering-metrics/)
 
+*Both dashboards refresh themselves weekly: a scheduled CI run re-clones each target repo,
+re-runs the full pipeline, validates the results, and commits the rebuilt site — plus an
+append-only history ledger of every contributor's score over time.*
+
 **Same engine, second repo:**
 [**impact/comfyui**](https://sbui056.github.io/engineering-metrics/comfyui/) — the analysis run
 against [Comfy-Org/ComfyUI](https://github.com/Comfy-Org/ComfyUI) (120k★). Two very different
@@ -78,4 +82,7 @@ SITE_URL=https://your-host.example/path make site
 The reviews step calls the GitHub API. It authenticates with `GITHUB_TOKEN` (environment or a
 local `.env`), falling back to the `gh` CLI's stored credential; with no token it degrades to a
 partial fetch and the pipeline marks the review signal as imputed rather than failing. API
-responses are cached under `.cache/` so reruns only refetch PRs that changed.
+responses are cached under `.cache/` so reruns only refetch PRs that changed. In CI,
+`REVIEWS_BUDGET` caps the requests spent per run (leaving rate-limit headroom for the Pages
+deploy); forks analyzing large repos can set a `REVIEWS_PAT` secret for a bigger budget on the
+cold first fetch.

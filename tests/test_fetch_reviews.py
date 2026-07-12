@@ -132,3 +132,15 @@ def test_github_url_regex():
     ):
         m = _GITHUB_URL_RE.search(url)
         assert m and m.group(1) == "hao-ai-lab/FastVideo", url
+
+
+def test_request_budget_stops_gracefully():
+    # a spent budget raises the same exception the partial-write path already
+    # handles — no network, no new failure mode
+    from fetch_reviews import GitHubClient, RateLimitExceeded
+    import pytest
+
+    client = GitHubClient(token=None, budget=0)
+    with pytest.raises(RateLimitExceeded, match="budget"):
+        client.get("https://api.github.invalid/never-called")
+    assert client.request_count == 0  # refused before spending anything

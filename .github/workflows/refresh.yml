@@ -52,6 +52,11 @@ jobs:
       - name: Refresh all repos (pipeline -> validate -> build -> ledger)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # spend at most this many API requests on reviews per run: the same
+          # installation rate limit feeds the Pages deployment that fires right
+          # after our push (a drained budget 403s it — seen on the first green
+          # run). Partial fetches catch up next week via the cache.
+          REVIEWS_BUDGET: "600"
         run: python scripts/refresh_all.py
 
       - name: Tests

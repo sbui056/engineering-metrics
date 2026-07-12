@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -54,7 +55,8 @@ class RateLimitExceeded(Exception):
 class GitHubClient:
     """Thin requests wrapper: auth header, pagination, short rate-limit waits."""
 
-    def __init__(self, token: str | None, max_wait_s: int = 180):
+    def __init__(self, token: str | None, max_wait_s: int = 180,
+                 budget: int | None = None):
         self.session = requests.Session()
         self.session.headers.update({
             "Accept": "application/vnd.github+json",
@@ -64,8 +66,18 @@ class GitHubClient:
             self.session.headers["Authorization"] = f"Bearer {token}"
         self.max_wait_s = max_wait_s
         self.request_count = 0
+        # optional request budget: in CI the same installation rate limit
+        # feeds the Pages deploy that runs right after us — spend at most
+        # `budget` requests, then stop via the graceful-partial contract
+        # (the cache resumes next run). None = uncapped (local use).
+        self.budget = budget
 
     def get(self, url: str, params: dict | None = None) -> requests.Response:
+        if self.budget is not None and self.request_count >= self.budget:
+            raise RateLimitExceeded(
+                f"request budget ({self.budget}) spent — leaving rate-limit "
+                "headroom; the cache resumes next run"
+            )
         while True:
             resp = self.session.get(url, params=params, timeout=30)
             self.request_count += 1
@@ -290,7 +302,8 @@ def main() -> None:
 
     cache_dir = config.CACHE_DIR / "github" / gh_repo.replace("/", "_")
     cache_dir.mkdir(parents=True, exist_ok=True)
-    client = GitHubClient(token)
+    budget_env = os.environ.get("REVIEWS_BUDGET", "").strip()
+    client = GitHubClient(token, budget=int(budget_env) if budget_env else None)
     resolver = build_from_repo(repo)
 
     review_events: list[tuple[int, str, str]] = []
