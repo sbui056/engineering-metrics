@@ -75,7 +75,11 @@ def run_checks(t: dict[str, pd.DataFrame]) -> Checker:
     own_f, own_a = t["ownership_file"], t["ownership_author"]
 
     print("commits_clean:")
-    c.check("dates are UTC datetimes", str(commits["date"].dtype) == "datetime64[ns, UTC]")
+    # tz-aware UTC is the contract; the storage unit (ns vs us) is a pandas
+    # version detail (pandas 3 defaults to microseconds) and not part of it
+    c.check("dates are UTC datetimes",
+            isinstance(commits["date"].dtype, pd.DatetimeTZDtype)
+            and str(commits["date"].dt.tz) == "UTC")
     c.check("additions/deletions are non-negative ints",
             bool((commits["additions"] >= 0).all() and (commits["deletions"] >= 0).all()))
     # Test the producers' real predicates on the distinct values, not a copy

@@ -1,5 +1,8 @@
 # Two org shapes, one engine
 
+*Numbers as of the 2026-07-11 analysis. The live dashboards refresh weekly and will drift from
+this snapshot; the shapes they describe won't.*
+
 The same pipeline, pointed at two repositories, detects two entirely different organizational
 realities. That contrast — not either leaderboard alone — is the strongest evidence that the
 signals measure something real about how codebases depend on people.
