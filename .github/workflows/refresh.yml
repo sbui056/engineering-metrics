@@ -1,0 +1,70 @@
+# Weekly data refresh: re-runs the analysis pipeline for every repo in
+# repos.yml and commits the rebuilt docs/ (site + og cards + history ledgers).
+#
+# Design notes:
+# - Weekly, not monthly: the reviews cache (actions/cache below) evicts after
+#   7 days unused; warm-cache runs only refetch PRs whose updated_at changed,
+#   which fits GITHUB_TOKEN's 1,000 req/hr Actions budget. A short window
+#   degrades to the fetcher's status=partial and catches up next week.
+# - validate.py failing aborts before any docs/ output is written for that
+#   repo, and the job fails without committing: stale-but-correct wins.
+# - The bot only ever commits docs/.
+name: refresh
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"   # Mondays 06:17 UTC — off the top-of-hour stampede
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: Restore reviews cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/github
+          key: reviews-${{ github.run_id }}
+          restore-keys: |
+            reviews-
+
+      - name: Refresh all repos (pipeline -> validate -> build -> ledger)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/refresh_all.py
+
+      - name: Tests
+        run: python -m pytest -q
+
+      - name: Commit refreshed site
+        run: |
+          if [ -n "$(git status --porcelain docs/)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add docs/
+            git commit -m "chore: weekly data refresh ($(date -u +%F))"
+            git push
+          else
+            echo "docs/ unchanged — nothing to commit"
+          fi

@@ -208,6 +208,14 @@ def test_repo_data_consistency_guard(monkeypatch):
     check_repo_data_consistency()
 
 
+def test_engine_link_in_footer(monkeypatch):
+    monkeypatch.setenv("TOOL_URL", "https://github.com/example/engine")
+    page = render_html(build_payload(_frames()))
+    assert 'class="espresso-run"' in page
+    assert 'href="https://github.com/example/engine"' in page
+    assert "run it on your repo" in page
+
+
 def test_siblings_cross_link(monkeypatch):
     # unset -> no sibling markup at all; set -> lowercase impact/<name> links
     monkeypatch.delenv("SIBLINGS", raising=False)

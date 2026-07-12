@@ -297,19 +297,11 @@ def check_repo_data_consistency() -> None:
         )
 
 
-def get_repo_url() -> str:
-    """The target repo's public URL, for the template's outbound links.
-
-    REPO_URL env overrides; otherwise read the clone's origin remote and
-    normalize (ssh -> https, strip .git). Empty string if neither resolves —
-    the template links then point at "#" rather than lying.
-    """
-    env = os.environ.get("REPO_URL", "").strip()
-    if env:
-        return env.rstrip("/")
+def _git_remote_url(path: Path) -> str:
+    """origin remote of a clone, normalized (ssh -> https, no .git); "" if none."""
     try:
         url = subprocess.run(
-            ["git", "-C", str(config.get_repo_path()), "remote", "get-url", "origin"],
+            ["git", "-C", str(path), "remote", "get-url", "origin"],
             capture_output=True, text=True, check=True,
         ).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -317,6 +309,25 @@ def get_repo_url() -> str:
     if url.startswith("git@"):
         url = "https://" + url[4:].replace(":", "/", 1)
     return url.removesuffix(".git").rstrip("/")
+
+
+def get_repo_url() -> str:
+    """The target repo's public URL, for the template's outbound links.
+
+    REPO_URL env overrides; otherwise read the clone's origin remote. Empty
+    string if neither resolves — links then point at "#" rather than lying.
+    """
+    env = os.environ.get("REPO_URL", "").strip()
+    return env.rstrip("/") if env else _git_remote_url(config.get_repo_path())
+
+
+def get_engine_url() -> str:
+    """This tool's own public URL (the footer's "run it on your repo" link).
+
+    TOOL_URL env overrides; otherwise the tool repo's origin remote.
+    """
+    env = os.environ.get("TOOL_URL", "").strip()
+    return env.rstrip("/") if env else _git_remote_url(config.ROOT)
 
 
 def org_lens(
@@ -721,6 +732,16 @@ def render_html(payload: dict) -> str:
         if sib_parts else ""
     )
 
+    # the conversion surface: the site links its own engine (hidden if the
+    # tool has no public remote)
+    engine_url = get_engine_url()
+    engine_line = (
+        f'<p class="espresso-run">Built with an open, deterministic pipeline — '
+        f'<a href="{html.escape(engine_url)}" target="_blank" '
+        f'rel="noopener noreferrer">run it on your repo ↗</a></p>'
+        if engine_url else ""
+    )
+
     out = template
     for marker, value in [
         ("<!--@INJECT:CSS-->", css),
@@ -745,6 +766,7 @@ def render_html(payload: dict) -> str:
         ("<!--@INJECT:TIENOTE2-->", tienote2),
         ("<!--@INJECT:CMPLINK-->", cmp_link),
         ("<!--@INJECT:SIBLINGS-->", siblings),
+        ("<!--@INJECT:ENGINELINE-->", engine_line),
     ]:
         if marker not in out:
             sys.exit(f"template.html is missing marker {marker}")

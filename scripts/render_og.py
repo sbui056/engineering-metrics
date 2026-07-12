@@ -26,7 +26,10 @@ def main() -> None:
         sys.exit("playwright not installed — `pip install playwright` (dev-only)")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(channel="chrome")
+        try:
+            browser = p.chromium.launch(channel="chrome")  # local dev
+        except Exception:
+            browser = p.chromium.launch()  # CI: playwright-installed chromium
         page = browser.new_page(
             viewport={"width": 1200, "height": 630}, device_scale_factor=2
         )

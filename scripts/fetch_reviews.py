@@ -121,6 +121,10 @@ def fetch_pulls(client: GitHubClient, gh_repo: str) -> list[dict]:
             "number": pr["number"],
             "author_login": user["login"],
             "updated_at": pr.get("updated_at") or "",
+            # timing fields ride the cache for future review-flow analytics
+            # (reviews.parquet schema unchanged — data contract intact)
+            "created_at": pr.get("created_at") or "",
+            "merged_at": pr.get("merged_at") or "",
         })
     return pulls
 
@@ -135,11 +139,17 @@ def fetch_pr_reviews(
         if cached.get("updated_at") == pr["updated_at"]:
             return cached["reviews"], True
     reviews = [
-        {"login": r["user"]["login"], "state": r.get("state") or ""}
+        {"login": r["user"]["login"], "state": r.get("state") or "",
+         "submitted_at": r.get("submitted_at") or ""}
         for r in client.paginate(f"/repos/{gh_repo}/pulls/{pr['number']}/reviews")
         if r.get("user") and r["user"].get("login")
     ]
-    cache_file.write_text(json.dumps({"updated_at": pr["updated_at"], "reviews": reviews}))
+    cache_file.write_text(json.dumps({
+        "updated_at": pr["updated_at"],
+        "created_at": pr.get("created_at") or "",
+        "merged_at": pr.get("merged_at") or "",
+        "reviews": reviews,
+    }))
     return reviews, False
 
 

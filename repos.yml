@@ -1,0 +1,23 @@
+# Analyzed repositories — one entry per deployment.
+# Consumed by scripts/refresh_all.py and .github/workflows/refresh.yml;
+# doubles as the per-repo runbook (bot filters, vendored-path exclusions).
+#
+#   slug           deployment path: "" (root) deploys to docs/, else docs/<slug>/
+#   clone          public clone URL (full history; blame needs it)
+#   data           dataset directory (DATA_DIR)
+#   bot_extra      extra bot/automation identities (comma-separated substrings)
+#   exclude_extra  extra excluded path segments (vendored/generated dirs)
+
+- slug: ""
+  name: FastVideo
+  clone: https://github.com/hao-ai-lab/FastVideo.git
+  data: data
+  bot_extra: ""
+  exclude_extra: ""
+
+- slug: comfyui
+  name: ComfyUI
+  clone: https://github.com/Comfy-Org/ComfyUI.git
+  data: data-comfyui
+  bot_extra: "comfyui-wiki,gemini-code-assist,comfy org pr bot"
+  exclude_extra: "web"

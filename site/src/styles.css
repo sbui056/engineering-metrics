@@ -118,6 +118,11 @@ html.js [data-reveal].in { opacity: 1; transform: none; }
    anchor jump): appear near-instantly instead of making the reader wait */
 html.js [data-reveal].in-fast { transition-duration: 0.18s; transition-delay: 0ms; }
 
+/* the footer's conversion line: the site links its own engine */
+.espresso-run { margin: 1.1rem 0 0; font: 400 0.875rem/1.6 var(--ui); color: rgba(243, 241, 235, 0.62); }
+.espresso-run a { color: var(--cream); text-decoration: underline; text-underline-offset: 3px; }
+.espresso-run a:hover { color: #fff; }
+
 /* ------------------------------------------------------------- prologue
    The guess beat: a compact gut-check between hero and story (6.7 demoted it
    from a full-screen gate — hero first). Lineless: no border, no wash of its
