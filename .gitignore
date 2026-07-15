@@ -16,6 +16,7 @@ target-repo/
 CLAUDE.md
 claude-code-launch-kit.md
 .claude/
+drafts/
 
 # OS
 .DS_Store

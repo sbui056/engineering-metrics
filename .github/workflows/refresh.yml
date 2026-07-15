@@ -51,12 +51,15 @@ jobs:
 
       - name: Refresh all repos (pipeline -> validate -> build -> ledger)
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # spend at most this many API requests on reviews per run: the same
-          # installation rate limit feeds the Pages deployment that fires right
-          # after our push (a drained budget 403s it — seen on the first green
-          # run). Partial fetches catch up next week via the cache.
-          REVIEWS_BUDGET: "600"
+          # Reviews fetch prefers the optional REVIEWS_PAT secret: a PAT has its
+          # own 5,000 req/hr limit, separate from the installation limit the
+          # Pages deployment shares, so the budget can open up. Without it,
+          # GITHUB_TOKEN's shared 1,000 req/hr allowance applies and the budget
+          # stays small (a drained budget 403s the Pages deploy that fires right
+          # after our push — seen on the first green run). Partial fetches catch
+          # up next week via the cache either way.
+          GITHUB_TOKEN: ${{ secrets.REVIEWS_PAT || secrets.GITHUB_TOKEN }}
+          REVIEWS_BUDGET: ${{ secrets.REVIEWS_PAT && '4000' || '600' }}
         run: python scripts/refresh_all.py
 
       - name: Tests
