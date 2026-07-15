@@ -732,6 +732,22 @@ def render_html(payload: dict) -> str:
         if sib_parts else ""
     )
 
+    # companion essay (ESSAY env: "Title=URL") cross-links the write-up from
+    # the nav and footer; hidden entirely when unset so the engine stays
+    # generic. rsplit: the title may contain "," or "=", the URL contains
+    # neither in this scheme.
+    essay_link = essay_line = ""
+    essay_env = os.environ.get("ESSAY", "")
+    if "=" in essay_env:
+        essay_title, essay_url = essay_env.rsplit("=", 1)
+        essay_title = html.escape(essay_title.strip())
+        essay_url = html.escape(essay_url.strip())
+        essay_link = f'<a class="nav-sib nav-essay" href="{essay_url}">the essay</a>'
+        essay_line = (
+            f'<p class="espresso-run">The story behind this analysis: '
+            f'<a href="{essay_url}">{essay_title} →</a></p>'
+        )
+
     # the conversion surface: the site links its own engine (hidden if the
     # tool has no public remote)
     engine_url = get_engine_url()
@@ -766,6 +782,8 @@ def render_html(payload: dict) -> str:
         ("<!--@INJECT:TIENOTE2-->", tienote2),
         ("<!--@INJECT:CMPLINK-->", cmp_link),
         ("<!--@INJECT:SIBLINGS-->", siblings),
+        ("<!--@INJECT:ESSAYLINK-->", essay_link),
+        ("<!--@INJECT:ESSAYLINE-->", essay_line),
         ("<!--@INJECT:ENGINELINE-->", engine_line),
     ]:
         if marker not in out:

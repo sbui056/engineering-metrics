@@ -1227,6 +1227,7 @@ tr.detail.open .detail-clip { grid-template-rows: 1fr; }
   /* four links + pill fit 390px: tighter pill, never two lines */
   .nav-pill { padding: 0.4rem 0.75rem; white-space: nowrap; }
   .nav-sib-wrap { display: none; } /* cross-links live in the README on phones */
+  .nav-essay { display: none; }    /* the footer line carries the essay on phones */
 }
 @media (max-width: 24rem) {
   /* small Androids: the pill duplicates the hero announce + footer repo

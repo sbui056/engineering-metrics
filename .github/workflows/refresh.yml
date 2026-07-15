@@ -60,6 +60,8 @@ jobs:
           # up next week via the cache either way.
           GITHUB_TOKEN: ${{ secrets.REVIEWS_PAT || secrets.GITHUB_TOKEN }}
           REVIEWS_BUDGET: ${{ secrets.REVIEWS_PAT && '4000' || '600' }}
+          # companion essay cross-linked from every dashboard's nav + footer
+          ESSAY: "Two org shapes, one engine=https://sbui056.github.io/engineering-metrics/two-org-shapes/"
         run: python scripts/refresh_all.py
 
       - name: Tests

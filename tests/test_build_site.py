@@ -179,7 +179,7 @@ def test_template_is_repo_agnostic():
                 / "template.html").read_text(encoding="utf-8")
     for literal in ("FastVideo", "fastvideo", "hao-ai-lab", "Eighty-two",
                     "William Lin", "Zhang Peiyuan", "0.79", "ρ=.79",
-                    "zero-review block"):
+                    "zero-review block", "two-org-shapes", "Two org shapes"):
         assert literal not in template, f"hardcoded repo literal/claim: {literal}"
 
 
@@ -219,12 +219,29 @@ def test_engine_link_in_footer(monkeypatch):
 def test_siblings_cross_link(monkeypatch):
     # unset -> no sibling markup at all; set -> lowercase impact/<name> links
     monkeypatch.delenv("SIBLINGS", raising=False)
+    monkeypatch.delenv("ESSAY", raising=False)
     page = render_html(build_payload(_frames()))
     assert 'class="nav-sib"' not in page  # (the CSS selector text is inlined)
     monkeypatch.setenv("SIBLINGS", "ComfyUI=https://example.test/comfyui/")
     page = render_html(build_payload(_frames()))
     assert 'class="nav-sib" href="https://example.test/comfyui/"' in page
     assert "impact/comfyui" in page
+
+
+def test_essay_cross_link(monkeypatch):
+    # unset -> no essay markup at all; set ("Title=URL", title may contain a
+    # comma) -> one nav link + one footer line, both escaped
+    monkeypatch.delenv("ESSAY", raising=False)
+    page = render_html(build_payload(_frames()))
+    assert 'class="nav-sib nav-essay"' not in page  # (the CSS selector text is inlined)
+    assert "The story behind this analysis" not in page
+    monkeypatch.setenv(
+        "ESSAY", "Two org shapes, one engine=https://example.test/two-org-shapes/")
+    page = render_html(build_payload(_frames()))
+    assert ('class="nav-sib nav-essay" href="https://example.test/two-org-shapes/"'
+            in page)
+    assert "Two org shapes, one engine →" in page
+    assert "The story behind this analysis" in page
 
 
 def test_measured_claims_in_payload_and_render():

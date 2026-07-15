@@ -56,8 +56,10 @@ site: narrate
 PAGES_URL ?= https://sbui056.github.io/engineering-metrics
 # Sibling deployments cross-link in the nav ("also: impact/<name>").
 SIBLINGS ?= ComfyUI=$(PAGES_URL)/comfyui/
+# Companion essay cross-links from the nav and footer ("Title=URL").
+ESSAY ?= Two org shapes, one engine=$(PAGES_URL)/two-org-shapes/
 deploy: narrate
-	SITE_URL=$(PAGES_URL) SIBLINGS="$(SIBLINGS)" $(PYTHON) scripts/build_site.py
+	SITE_URL=$(PAGES_URL) SIBLINGS="$(SIBLINGS)" ESSAY="$(ESSAY)" $(PYTHON) scripts/build_site.py
 	$(PYTHON) scripts/render_og.py
 	mkdir -p docs
 	cp dist/index.html docs/index.html
@@ -69,7 +71,7 @@ deploy: narrate
 #   make deploy-site SLUG=comfyui DATA=data-comfyui REPO_PATH=target-repo/ComfyUI \
 #        SIBLINGS="FastVideo=$(PAGES_URL)/"
 deploy-site: narrate
-	SITE_URL=$(PAGES_URL)/$(SLUG) SIBLINGS="$(SIBLINGS)" $(PYTHON) scripts/build_site.py
+	SITE_URL=$(PAGES_URL)/$(SLUG) SIBLINGS="$(SIBLINGS)" ESSAY="$(ESSAY)" $(PYTHON) scripts/build_site.py
 	$(PYTHON) scripts/render_og.py
 	mkdir -p docs/$(SLUG)
 	cp dist/index.html docs/$(SLUG)/index.html
