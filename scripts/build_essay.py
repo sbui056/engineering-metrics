@@ -384,8 +384,6 @@ GUARD_WHITELIST = {
     "0", "1.0", "0.25", "0.0005",
     # approximate public facts stated as approximations
     "120,000",
-    # [VERIFY at freeze] items still provisional in the draft
-    "4,487", "0.44",
     # "top 6%" derived from #19 of 311
     "6",
 }

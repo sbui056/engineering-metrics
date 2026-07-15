@@ -89,6 +89,20 @@ def risk_entry(d: dict, name: str) -> dict | None:
             "no_second": e["no_second"], "nearest": e["nearest"]}
 
 
+def comfyui_pr_count() -> int | None:
+    """Total PRs on ComfyUI via the gh CLI (search API). The essay states this
+    as scale context for the review fetch; None if offline (guard then fails
+    loudly on the stale prose number, which is the right failure)."""
+    try:
+        out = subprocess.run(
+            ["gh", "api", "search/issues?q=repo:Comfy-Org/ComfyUI+type:pr&per_page=1",
+             "--jq", ".total_count"],
+            capture_output=True, text=True, check=True, timeout=30).stdout.strip()
+        return int(out)
+    except (subprocess.SubprocessError, ValueError, OSError):
+        return None
+
+
 def complete_comfyui_ranks() -> dict:
     """Ranks from the 2026-07-11 complete-reviews analysis (local parquet)."""
     df = pd.read_parquet(ROOT / "data-comfyui" / "scored.parquet")
@@ -148,7 +162,7 @@ def main():
             "FROZEN": cu["meta"]["review_status"] == "complete",
         },
         "fastvideo": summarize(fv),
-        "comfyui": summarize(cu),
+        "comfyui": {**summarize(cu), "pr_count": comfyui_pr_count()},
         "people": {
             "fastvideo": {n: person(fv, n) for n in (
                 "alexzms", "William Lin", "Zhang Peiyuan", "Satyam Srivastava",
