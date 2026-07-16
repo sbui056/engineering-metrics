@@ -2169,6 +2169,30 @@
     update();
   })();
 
+  /* ------------------------------------------- scroll-progress fallback
+     The gauge is CSS scroll-timeline where supported; this covers the rest
+     (Firefox stable). The support check guarantees exactly one path runs.
+     Scroll-scrubbed, so reduced motion switches it off like scrollBus. */
+  (function progressFallback() {
+    if (reducedMotion) return;
+    if (window.CSS && CSS.supports && CSS.supports("animation-timeline: scroll()")) return;
+    var bar = document.querySelector(".scroll-progress i");
+    if (!bar) return;
+    var ticking = false;
+    function update() {
+      ticking = false;
+      var max = document.documentElement.scrollHeight - window.innerHeight;
+      var f = max > 0 ? Math.max(0, Math.min(1, window.scrollY / max)) : 0;
+      bar.style.transform = "scaleX(" + f.toFixed(4) + ")";
+    }
+    function onScroll() {
+      if (!ticking) { ticking = true; requestAnimationFrame(update); }
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    update();
+  })();
+
   /* --------------------------------------------------------- arc parallax
      two planes: arcs drift at 0.06, the hero content at 0.025 (NOT .formula —
      it carries data-reveal, whose transform the reveal system owns) */

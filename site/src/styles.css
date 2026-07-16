@@ -54,6 +54,19 @@
   --r-2xl: 28px;
 }
 
+/* real spring for --ease-spring where linear() is supported (Chrome 113+,
+   Firefox 112+, Safari 17.2+): one gentle overshoot (~4%), settled by 60%.
+   Generated from a damped spring (zeta 0.72). The token upgrade must happen
+   inside @supports — a linear() fallback chain through var() would fail at
+   computed-value time and reset to `initial`, not the previous value. */
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --ease-spring: linear(0, 0.1531 5%, 0.4376 10%, 0.6982 15%, 0.8803 20%,
+        0.9835 25%, 1.0283 30%, 1.0384 35%, 1.0322 40%, 1.0212 45%,
+        1.0113 50%, 1.0044 55%, 1);
+  }
+}
+
 *, *::before, *::after { box-sizing: border-box; }
 html { scroll-behavior: smooth; background: var(--paper); }
 body {
@@ -80,12 +93,12 @@ section { scroll-margin-top: calc(var(--nav-h) + 1rem); }
 .num-data { font-variant-numeric: tabular-nums; }
 
 .skip {
-  position: absolute; left: 1rem; top: -3rem; z-index: 100;
+  position: absolute; left: 1rem; top: 0.75rem; z-index: 100;
   background: var(--ink); color: var(--cream); text-decoration: none;
   font: 500 0.8125rem var(--ui); padding: 0.5rem 1rem; border-radius: 99px;
-  transition: top var(--swift);
+  transform: translateY(-4.75rem); transition: transform var(--swift);
 }
-.skip:focus { top: 0.75rem; }
+.skip:focus { transform: translateY(0); }
 .noscript { max-width: 72rem; margin: 2rem auto; padding: 0 2rem; color: var(--ink-2); }
 
 /* structure felt, not seen: no page frame, no section divider lines —
@@ -224,6 +237,30 @@ html.js [data-reveal].in-fast { transition-duration: 0.18s; transition-delay: 0m
   .prologue-cap { display: none; } /* the slider alone reads fine on phones */
 }
 
+/* ------------------------------------------------------- scroll progress
+   Hairline reading gauge pinned above the nav. Scroll-linked, not animated:
+   CSS scroll-timeline where supported, the app.js fallback elsewhere
+   (Firefox stable still flags scroll-driven animations). Invisible at
+   scaleX(0) under no-JS + no-support, under reduced motion (convention:
+   scroll-scrubbed effects switch off), and in print. */
+.scroll-progress {
+  position: fixed; top: 0; left: 0; right: 0; height: 2px;
+  z-index: 41; pointer-events: none;
+}
+.scroll-progress i {
+  display: block; height: 100%; background: var(--verm);
+  transform: scaleX(0); transform-origin: 0 50%;
+}
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: scroll()) {
+    .scroll-progress i {
+      animation: sp-grow linear both;
+      animation-timeline: scroll(root);
+    }
+  }
+}
+@keyframes sp-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
 /* ------------------------------------------------------------------- nav */
 .nav {
   position: sticky; top: 0; z-index: 40;
@@ -233,7 +270,12 @@ html.js [data-reveal].in-fast { transition-duration: 0.18s; transition-delay: 0m
   /* flat nav (Claude/Clay): no border — elevation arrives only on scroll */
   transition: box-shadow 0.25s var(--ease);
 }
-.nav.scrolled { box-shadow: rgba(42, 31, 26, 0.07) 0 6px 16px -8px; }
+/* hairline lives in the shadow, not a border — a real border would add 1px
+   of nav height mid-scroll and shift everything below it */
+.nav.scrolled {
+  box-shadow: 0 1px 0 var(--hair),
+              rgba(42, 31, 26, 0.07) 0 6px 16px -8px;
+}
 .nav-inner {
   padding: 0 2rem; height: var(--nav-h);
   display: flex; align-items: center; justify-content: space-between; gap: 1rem;
@@ -258,12 +300,19 @@ html.js [data-reveal].in-fast { transition-duration: 0.18s; transition-delay: 0m
 }
 .nav-links a:hover { color: var(--ink); background: var(--cream); }
 .nav-links a.active { color: var(--ink); }
+/* the nav recedes once the page is moving: secondary links dim so content
+   leads; hover and the scroll-spy active state restore full ink */
+.nav.scrolled .nav-links a { color: var(--ink-3); }
+.nav.scrolled .nav-links a:hover,
+.nav.scrolled .nav-links a:focus-visible,
+.nav.scrolled .nav-links a.active { color: var(--ink); }
 .nav-pill {
   font: 500 0.8125rem var(--ui); color: var(--cream); background: var(--ink);
   text-decoration: none; border-radius: 99px; padding: 0.5rem 1rem;
   transition: transform var(--swift), background-color var(--swift);
 }
 .nav-pill:hover { background: #000; transform: translateY(-1px); }
+.nav-pill:active { transform: translateY(0) scale(0.98); }
 
 /* ------------------------------------------------------------------ hero */
 .hero { position: relative; overflow: hidden; }
@@ -671,9 +720,10 @@ h2 {
   padding: 0.8rem 1rem;
   font: 500 0.65625rem var(--mono); letter-spacing: 0.07em; text-transform: uppercase;
   color: var(--ink-3); cursor: pointer;
-  transition: color var(--swift);
+  transition: color var(--swift), transform var(--swift);
 }
 .board thead th button:hover { color: var(--ink); }
+.board thead th button:active { transform: translateY(1px); }
 .board thead th button:focus-visible { outline: 2px solid var(--verm); outline-offset: -2px; }
 .board thead th[aria-sort] button { color: var(--ink); }
 .board thead th[aria-sort="ascending"] button::after { content: " ↑"; color: var(--verm); }
@@ -998,6 +1048,7 @@ tr.tier-row td {
   transition: transform var(--swift), background-color var(--swift);
 }
 .board-foot .pill-ink:hover { transform: translateY(-1px); }
+.board-foot .pill-ink:active { transform: translateY(0) scale(0.98); }
 .empty-state { padding: 2.5rem 1rem 2.75rem; text-align: center; color: var(--ink-2); font-size: 0.9375rem; }
 .empty-face { display: flex; gap: 7px; justify-content: center; margin-bottom: 0.9rem; }
 .empty-face i { width: 9px; height: 9px; border-radius: 50%; background: var(--putty); }
@@ -1249,7 +1300,7 @@ tr.detail.open .detail-clip { grid-template-rows: 1fr; }
 /* ---------------------------------------------------------------- print */
 @media print {
   .nav, .hero-ctas, .announce, .field-controls, .table-tools, .board-foot,
-  .skip, .tooltip, .hero-arcs, .espresso-arcs,
+  .skip, .tooltip, .hero-arcs, .espresso-arcs, .scroll-progress,
   .crosshair, .proxy-dot, .mixer, .prologue,
   .compare-tray, .compare-modal, .row-compare,
   .sim-head, .sim-back { display: none !important; } /* org section prints; its controls don't */
