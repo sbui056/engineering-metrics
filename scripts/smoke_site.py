@@ -7,7 +7,8 @@ Checks per engine (chromium, webkit, firefox) x (normal, reduced-motion):
 hero-first layout, the guess beat plays and claims the measured correlation,
 the org-lens section renders with the sim's real numbers, the curated compare
 deep link opens the dialog, the Ctrl/Cmd+K palette opens/jumps/closes with the
-Escape cascade intact, and the page throws zero errors.
+Escape cascade intact, and the page throws zero errors. A final chromium
+phone pass (390x844, touch) covers the mobile signal strips and overflow.
 
 Assertion style matters (hard-won): computed visibility, never the `hidden`
 attribute; `offsetParent` is null for position:fixed elements.
@@ -106,6 +107,12 @@ def main() -> None:
                     fails.append(f"[{tag}] compare deep link failed")
                 pg.keyboard.press("Escape")
 
+                # the phone-only signal strip stays out of desktop rows
+                if pg.eval_on_selector(
+                    "tr.row .sig-inline", "el=>getComputedStyle(el).display"
+                ) != "none":
+                    fails.append(f"[{tag}] .sig-inline visible at desktop width")
+
                 # command palette: Ctrl+K opens, a typed contributor jumps to
                 # their open detail row, Escape closes the palette itself
                 # (cascade order: the compare modal must stay untouched)
@@ -184,6 +191,65 @@ def main() -> None:
                     print(f"[{tag}] OK")
                 ctx.close()
             browser.close()
+
+        # phone pass (chromium, real 390x844 viewport — headless min-width
+        # clamps fake widths): the tap-to-pin strip carries its four signal
+        # bars, rows swap in the inline strip for the hidden columns, and
+        # nothing scrolls horizontally
+        tag = "chromium/390"
+        browser = p.chromium.launch()
+        ctx = browser.new_context(
+            viewport={"width": 390, "height": 844}, has_touch=True
+        )
+        pg = ctx.new_page()
+        errs = []
+        pg.on("pageerror", lambda e: errs.append(str(e)))
+        pg.goto(url)
+        pg.wait_for_timeout(800)
+        overflow = pg.evaluate(
+            "()=>document.documentElement.scrollWidth"
+            " - document.documentElement.clientWidth"
+        )
+        if overflow > 0:
+            fails.append(f"[{tag}] horizontal page overflow: {overflow}px")
+        pg.eval_on_selector(
+            "#field", "el=>el.scrollIntoView({behavior:'instant',block:'center'})"
+        )
+        pg.wait_for_timeout(900)
+        dot = pg.evaluate(
+            "()=>{const d=[...document.querySelectorAll('circle.dot-hit')][5];"
+            "if(!d)return null;const r=d.getBoundingClientRect();"
+            "return {x:r.x+r.width/2, y:r.y+r.height/2}}"
+        )
+        if not dot:
+            fails.append(f"[{tag}] no dot to tap")
+        else:
+            pg.touchscreen.tap(dot["x"], dot["y"])
+            pg.wait_for_timeout(400)
+            if not pg.query_selector(".pin-strip") or not pg.eval_on_selector(
+                ".pin-strip", VIS
+            ):
+                fails.append(f"[{tag}] tap did not raise the pin strip")
+            elif pg.eval_on_selector(
+                ".pin-strip", "el=>el.querySelectorAll('.pin-sigs .fill').length"
+            ) != 4:
+                fails.append(f"[{tag}] pin strip missing its four signal bars")
+        pg.eval_on_selector(
+            "#leaderboard", "el=>el.scrollIntoView({behavior:'instant'})"
+        )
+        pg.wait_for_timeout(400)
+        if not pg.eval_on_selector("tr.row .sig-inline", VIS):
+            fails.append(f"[{tag}] inline signal strip hidden on phone rows")
+        elif pg.eval_on_selector(
+            "tr.row .sig-inline", "el=>el.querySelectorAll('.fill').length"
+        ) != 4:
+            fails.append(f"[{tag}] inline strip missing its four bars")
+        if errs:
+            fails.append(f"[{tag}] page errors: {errs}")
+        else:
+            print(f"[{tag}] OK")
+        ctx.close()
+        browser.close()
 
     if fails:
         print("\nFAILURES:\n" + "\n".join(fails))

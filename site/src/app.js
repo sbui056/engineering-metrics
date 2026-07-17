@@ -974,6 +974,9 @@
       go.type = "button";
       go.addEventListener("click", function () { jumpToAuthor(p.a.name); });
       pinStrip.appendChild(go);
+      // the four-signal readout hover users get from the crosshair, on its
+      // own wrapped row (the name/meta column is already at its 320px minimum)
+      pinStrip.appendChild(sigStrip(p.a, "pin-sigs"));
       if (hashSetC) hashSetC(p.a.name);
     }
     var lastPointerType = "mouse";
@@ -1155,6 +1158,25 @@
     return wrap;
   }
 
+  // four-signal micro strip: the phone stand-in for the signal columns
+  // (leaderboard name cell ≤45rem) and the tap-to-pin strip's second row.
+  // Same bars, colors, and imputed hatching as the columns; the "sig" class
+  // borrows their track/fill styling. Bars are one image to a screen reader.
+  function sigStrip(a, cls) {
+    var strip = el("div", "sig " + cls);
+    strip.setAttribute("role", "img");
+    var parts = [];
+    SIGNALS.forEach(function (s) {
+      var bar = microBar(a.signals[s.key],
+        s.key === "review_leverage" && a.flags.review_imputed, false, s.key);
+      bar.title = s.label + " " + pctLabel(a.signals[s.key]);
+      strip.appendChild(bar);
+      parts.push(s.short + " " + pctLabel(a.signals[s.key]));
+    });
+    strip.setAttribute("aria-label", "signals: " + parts.join(", "));
+    return strip;
+  }
+
   function buildRow(a) {
     var tr = el("tr", "row");
     tr.dataset.name = a.name;
@@ -1201,6 +1223,9 @@
       gh.addEventListener("click", function (ev) { ev.stopPropagation(); });
       name.appendChild(gh);
     }
+    // phones lose the four signal columns (≤45rem); this strip inside the
+    // name cell carries the same bars there, CSS-hidden at desktop widths
+    name.appendChild(sigStrip(a, "sig-inline"));
     var impact = el("td", "w-impact");
     impact.appendChild(microBar(mixOn ? mixLab.score[a.name] : a.impact, false, true));
     tr.appendChild(rank); tr.appendChild(name); tr.appendChild(impact);

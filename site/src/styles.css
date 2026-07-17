@@ -766,7 +766,7 @@ tr.row.pulse { animation: row-pulse 0.9s var(--ease) 0.4s both; }
 
 /* tap-to-pin strip: the touch answer to hover (fixed slot under the chart) */
 .pin-strip {
-  display: flex; align-items: center; gap: 0.65rem;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.65rem;
   margin-top: 0.65rem; padding: 0.55rem 0.8rem;
   background: var(--cream); border-radius: var(--r-md);
   font-size: 0.8125rem; color: var(--ink-2);
@@ -787,6 +787,16 @@ tr.row.pulse { animation: row-pulse 0.9s var(--ease) 0.4s both; }
   font: 500 0.78125rem var(--ui); color: var(--link);
   border-bottom: 1px solid currentColor;
 }
+/* the pinned contributor's four signal bars: a full-width wrapped row (the
+   name/meta column has no spare width at 320px); .sig lends track/fill */
+.pin-sigs {
+  flex: 1 0 100%; display: flex; align-items: center; gap: 0.5rem;
+  margin-top: 0.1rem;
+}
+.pin-sigs .sig-wrap { flex: 1; min-width: 0; max-width: 4.5rem; }
+/* the column tracks' 3.2rem floor overflows four-up at 320px; shrink here
+   (three classes: .sig .track sits later in the file and ties two) */
+.pin-strip .pin-sigs .track { min-width: 0; }
 
 /* detail-row actions (permalink + markdown) */
 .detail-actions { display: flex; gap: 0.4rem; margin-top: 1rem; }
@@ -1184,6 +1194,9 @@ td.sig { width: 5.5rem; }
   background: repeating-linear-gradient(45deg,
     var(--sig-color, var(--rev)) 0 3px, transparent 3px 6px) !important;
 }
+/* the name cell's four-bar strip exists for phones only: the 45rem query
+   swaps it in as the signal columns leave */
+.sig-inline { display: none; }
 
 .badge {
   display: inline-block; font: 400 0.65625rem var(--mono);
@@ -1441,6 +1454,9 @@ tr.detail.open .detail-clip { grid-template-rows: 1fr; }
 }
 @media (max-width: 45rem) {
   .board th.w-sig, .board td.sig { display: none; }
+  .sig-inline { display: flex; align-items: center; gap: 0.45rem;
+    margin-top: 0.4rem; max-width: 14rem; }
+  .sig-inline .sig-wrap { flex: 1; }
   .nav-inner { padding: 0 1rem; }
   .wordmark { display: none; } /* the announce pill names the repo below */
   .nav-links { flex: 1; justify-content: flex-start; gap: 0; }
@@ -1477,6 +1493,7 @@ tr.detail.open .detail-clip { grid-template-rows: 1fr; }
   .crosshair, .proxy-dot, .mixer, .prologue,
   .compare-tray, .compare-modal, .row-compare, .palette,
   .legend, .beacon, .beacon-tip, .foot-shortcuts,
+  .pin-strip, .sig-inline,
   .sim-head, .sim-back { display: none !important; } /* org section prints; its controls don't */
   body { background: #fff; color: #000; }
   body::before { display: none; }

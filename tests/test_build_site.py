@@ -497,3 +497,21 @@ def test_rendered_page_legend_and_hints():
     # the gravity easter egg stays fully secret (user decision)
     legend_html = page.split('id="legend"', 1)[1].split("</dl>", 1)[0]
     assert "gravity" not in legend_html.lower()
+
+
+def test_rendered_page_mobile_signal_strips():
+    page = render_html(build_payload(_frames()))
+    # both strips are JS-generated, so the contract lives in the CSS: the
+    # name-cell strip ships hidden and only the 45rem query swaps it in as
+    # the signal columns leave; the pin strip's bars ride a wrapped row
+    assert ".sig-inline { display: none; }" in page
+    # two 45rem queries exist (view-tab labels earlier); the swap is in the last
+    phone = page.rsplit("@media (max-width: 45rem)", 1)[1].split("@media", 1)[0]
+    assert ".sig-inline { display: flex;" in phone
+    assert ".board th.w-sig, .board td.sig { display: none; }" in phone
+    assert ".pin-sigs {" in page
+    # neither strip prints (print restores the real signal columns instead)
+    print_head = page.split("@media print", 1)[1].split("}", 1)[0]
+    for cls in (".pin-strip", ".sig-inline"):
+        assert cls in print_head, f"{cls} missing from the print hide list"
+    assert ".board th.w-sig, .board td.sig { display: table-cell !important; }" in page
