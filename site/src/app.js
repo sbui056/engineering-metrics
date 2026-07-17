@@ -15,6 +15,11 @@
   AUTHORS.forEach(function (a) { byName[a.name] = a; });
 
   var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // display only (the ⌘K/Ctrl K glyphs); key handlers accept meta OR ctrl.
+  // case-insensitive: userAgentData says "macOS", navigator.platform "MacIntel"
+  var isMac = /mac|iph|ipad|ipod/i.test(
+    (navigator.userAgentData && navigator.userAgentData.platform) ||
+    navigator.platform || "");
 
   // fixed signal colors (validated categorical set — see styles.css tokens);
   // identity is carried consistently: formula, minibars, detail bars, icons
@@ -184,6 +189,11 @@
   var compareGetPair = null;// set by compare; read by hashState.serialize (#cmp)
   var compareApply = null;  // set by compare; called by hashState on a #cmp deep-link
   var compareClose = null;  // set by compare; called by the global Escape handler
+  var paletteToggle = null; // set by palette; the global Cmd/Ctrl+K binding
+  var paletteClose = null;  // set by palette; called by the global Escape handler
+  var legendOpen = null;    // set by legend; "?", the palette action, the footer link
+  var legendClose = null;   // set by legend; called by the global Escape handler
+  var hintTipClose = null;  // set by hints; Escape dismisses an open beacon tip
   var orgSimSet = null;     // set by orgLens; row ⚠ badges preselect the sim through here
   // weight-mixer state (null = shipped scoring): {score, rank} maps by name.
   // mixScores additionally bends the spectrum view's x inside retarget().
@@ -1401,6 +1411,7 @@
     var btns = defs.map(function (d) {
       var b = el("button", null, d.label);
       b.type = "button";
+      b.dataset.preset = d.id; // stable hook: the command palette clicks these
       b.setAttribute("role", "radio");
       b.addEventListener("click", function () { d.on(); flipRender(); writeHash(false); });
       seg.appendChild(b);
@@ -2630,9 +2641,465 @@
     renderTray();
   })();
 
+  /* ------------------------------------------------------ command palette
+     Cmd/Ctrl+K jump-anywhere: sections, contributors, actions. ARIA 1.2
+     combobox — DOM focus stays on the input, aria-activedescendant tracks
+     the highlighted option. Ephemeral by design: nothing here writes the
+     hash directly, and the whole surface is absent without JS. Actions
+     reuse the page's own controls (thesis presets, sort headers, the
+     mixer's reset button) so seg thumbs and hash writes stay in sync. */
+  (function palette() {
+    var root = document.getElementById("palette");
+    var backdrop = document.getElementById("palette-backdrop");
+    var input = document.getElementById("palette-input");
+    var list = document.getElementById("palette-list");
+    var emptyNote = document.getElementById("palette-empty");
+    if (!root || !backdrop || !input || !list || !emptyNote) return;
+
+    var isOpen = false;
+    var lastFocus = null;
+    var items = [];  // flat activatable options for the current query
+    var active = 0;  // index into items
+
+    var navBtn = document.getElementById("nav-kbd");
+    if (navBtn) {
+      navBtn.textContent = isMac ? "⌘K" : "Ctrl K";
+      navBtn.hidden = false; // stays hidden without JS — it would be a dead control
+      navBtn.addEventListener("click", function () { openPal(navBtn); });
+    }
+
+    var SECTIONS = [
+      { label: "Top", target: "top" },
+      { label: "Story", target: "story" },
+      { label: "Leaderboard", target: "leaderboard" },
+      { label: "Team", target: "team" },
+      { label: "Method", target: "method" },
+      { label: "Weight lab", target: "mixer" }
+    ];
+    function clickIt(sel) {
+      return function () {
+        var b = document.querySelector(sel);
+        if (b) b.click();
+      };
+    }
+    // scroll: an action whose visible result is elsewhere jumps to it —
+    // a palette action that changes something offscreen reads as a no-op
+    var ACTIONS = [
+      { label: "Field view: spectrum", view: "spectrum" },
+      { label: "Field view: activity", view: "activity" },
+      { label: "Field view: signals", view: "signals" },
+      { label: "Field view: tiers", view: "tiers" },
+      { label: "Sort the board by impact",
+        run: clickIt('.seg-board button[data-preset="impact"]'), goto: "leaderboard" },
+      { label: "Sort the board by raw commits",
+        run: clickIt('.seg-board button[data-preset="commits"]'), goto: "leaderboard" },
+      { label: "Sort the board by name",
+        run: clickIt('.board thead th[data-sort="name"] button'), goto: "leaderboard" },
+      { label: "Reset the weight lab", run: clickIt("#mixer-reset"), goto: "mixer" },
+      { label: "Keyboard shortcuts",
+        run: function () { if (legendOpen) legendOpen(); } }
+    ];
+
+    function goTo(id) {
+      var target = document.getElementById(id);
+      if (target) target.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth" });
+    }
+    function optLi(labelText, metaText) {
+      var li = el("li", "palette-opt");
+      li.appendChild(el("span", "palette-opt-label", labelText));
+      if (metaText) li.appendChild(el("span", "palette-opt-meta", metaText));
+      return li;
+    }
+    function sectionOpt(s) {
+      return { li: optLi(s.label, "section"), noRestore: true,
+        act: function () { goTo(s.target); } };
+    }
+    function contributorOpt(a) {
+      var li = el("li", "palette-opt");
+      li.appendChild(el("span",
+        "monogram" + (a.tier === 1 ? " t1" : ""), monogramText(a.name)));
+      li.appendChild(el("span", "palette-opt-label", a.name));
+      li.appendChild(el("span", "palette-opt-meta", "rank " + a.rank + " · T" + a.tier));
+      return { li: li, noRestore: true,
+        act: function () { jumpToAuthor(a.name); } };
+    }
+    function actionOpt(x) {
+      return { li: optLi(x.label, "action"), noRestore: !!(x.view || x.goto),
+        act: function () {
+          if (x.view) {
+            if (setFieldView) setFieldView(x.view);
+            goTo("field");
+          } else {
+            x.run();
+            if (x.goto) goTo(x.goto);
+          }
+        } };
+    }
+
+    function build(q) {
+      list.textContent = "";
+      items = [];
+      var groups = [];
+      function byLabel(x) { return x.label.toLowerCase().indexOf(q) !== -1; }
+      if (!q) {
+        groups.push({ name: "Sections", opts: SECTIONS.map(sectionOpt) });
+        groups.push({ name: "Actions", opts: ACTIONS.map(actionOpt) });
+      } else {
+        var secs = SECTIONS.filter(byLabel).map(sectionOpt);
+        var names = AUTHORS.filter(function (a) {
+          return a.name.toLowerCase().indexOf(q) !== -1;
+        });
+        names.sort(function (a, b) { // starts-with first, then rank (board convention)
+          var pa = a.name.toLowerCase().indexOf(q) === 0 ? 0 : 1;
+          var pb = b.name.toLowerCase().indexOf(q) === 0 ? 0 : 1;
+          if (pa !== pb) return pa - pb;
+          return a.rank - b.rank;
+        });
+        var ppl = names.slice(0, 8).map(contributorOpt);
+        var acts = ACTIONS.filter(byLabel).map(actionOpt);
+        if (secs.length) groups.push({ name: "Sections", opts: secs });
+        if (ppl.length) groups.push({ name: "Contributors", opts: ppl });
+        if (acts.length) groups.push({ name: "Actions", opts: acts });
+      }
+      var n = 0;
+      groups.forEach(function (g) {
+        var head = el("li", "palette-group", g.name);
+        head.setAttribute("role", "presentation");
+        list.appendChild(head);
+        g.opts.forEach(function (o) {
+          o.li.id = "pal-opt-" + n;
+          n += 1;
+          o.li.setAttribute("role", "option");
+          o.li.setAttribute("aria-selected", "false");
+          list.appendChild(o.li);
+          items.push(o);
+        });
+      });
+      emptyNote.hidden = items.length !== 0;
+      active = 0;
+      setActive(0);
+    }
+
+    function setActive(i) {
+      if (!items.length) {
+        input.removeAttribute("aria-activedescendant");
+        return;
+      }
+      i = ((i % items.length) + items.length) % items.length;
+      items[active].li.setAttribute("aria-selected", "false");
+      active = i;
+      var li = items[active].li;
+      li.setAttribute("aria-selected", "true");
+      input.setAttribute("aria-activedescendant", li.id);
+      var lr = li.getBoundingClientRect(), pr = list.getBoundingClientRect();
+      if (lr.top < pr.top || lr.bottom > pr.bottom) li.scrollIntoView({ block: "nearest" });
+    }
+
+    function activate(o) {
+      // close first: palette-lock's overflow:hidden would eat the scroll,
+      // and jumpToAuthor's row focus must not be stolen by a focus restore
+      closePal(!o.noRestore);
+      o.act();
+    }
+
+    function openPal(invoker) {
+      if (isOpen) return;
+      if (compareClose) compareClose(); // single-modal policy: never stacked
+      isOpen = true;
+      // invoker passed explicitly where known: WebKit doesn't focus buttons
+      // on click, so document.activeElement would be <body>
+      lastFocus = invoker || document.activeElement;
+      root.hidden = false;
+      document.body.classList.add("palette-lock");
+      tipHide(); // the tooltip is fixed at z-60 and would float over the scrim
+      input.value = "";
+      build("");
+      input.focus();
+    }
+    function closePal(restore) {
+      if (!isOpen) return false;
+      isOpen = false;
+      root.hidden = true;
+      document.body.classList.remove("palette-lock");
+      if (restore !== false && lastFocus && lastFocus.focus) lastFocus.focus();
+      lastFocus = null;
+      return true;
+    }
+
+    input.addEventListener("input", function () {
+      build(input.value.trim().toLowerCase());
+    });
+    input.addEventListener("keydown", function (ev) {
+      if (ev.key === "ArrowDown") { ev.preventDefault(); setActive(active + 1); }
+      else if (ev.key === "ArrowUp") { ev.preventDefault(); setActive(active - 1); }
+      else if (ev.key === "Home" && !input.value) { ev.preventDefault(); setActive(0); }
+      else if (ev.key === "End" && !input.value) { ev.preventDefault(); setActive(items.length - 1); }
+      else if (ev.key === "Enter") {
+        ev.preventDefault();
+        if (items[active]) activate(items[active]);
+      } else if (ev.key === "Tab") {
+        ev.preventDefault(); // scrim modal: Tab must not land behind the scrim
+      }
+    });
+    // options aren't focusable (combobox keeps DOM focus on the input), so
+    // stop mousedown from blurring the input to <body> before click lands
+    list.addEventListener("mousedown", function (ev) { ev.preventDefault(); });
+    list.addEventListener("click", function (ev) {
+      var li = ev.target.closest(".palette-opt");
+      if (!li) return;
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].li === li) { activate(items[i]); return; }
+      }
+    });
+    list.addEventListener("mousemove", function (ev) {
+      var li = ev.target.closest(".palette-opt");
+      if (!li) return;
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].li === li) {
+          if (i !== active) setActive(i);
+          return;
+        }
+      }
+    });
+    backdrop.addEventListener("click", function () { closePal(); });
+
+    paletteClose = function () { return closePal(); };
+    paletteToggle = function () {
+      if (isOpen) closePal();
+      else openPal();
+    };
+  })();
+
+  /* -------------------------------------------------- discoverability hints
+     Two pulse beacons on the field card, each opening a one-line tip. Any
+     dismissal is permanent — the ✕, Escape, clicking away, or actually using
+     the feature it points at — via a storage-backed latch, so a visitor sees
+     each hint at most once. localStorage throws on file:// in Firefox and
+     Safari (SecurityError), so it is probed inside try/catch with an
+     in-memory fallback: there the hints return per load, a dev-only case. */
+  (function hints() {
+    var store = (function () {
+      var mem = {};
+      var ok = false;
+      try {
+        localStorage.setItem("hint.v1.probe", "1");
+        localStorage.removeItem("hint.v1.probe");
+        ok = true;
+      } catch (e) { /* storage denied — fall through to the in-memory latch */ }
+      return {
+        done: function (k) {
+          if (ok) {
+            try { return localStorage.getItem("hint.v1." + k) === "1"; }
+            catch (e) { /* fall through */ }
+          }
+          return mem[k] === "1";
+        },
+        mark: function (k) {
+          if (ok) {
+            try { localStorage.setItem("hint.v1." + k, "1"); return; }
+            catch (e) { /* fall through */ }
+          }
+          mem[k] = "1";
+        }
+      };
+    })();
+
+    var field = document.getElementById("field");
+    var stage = document.querySelector(".field-stage");
+    var controls = document.querySelector(".field-controls");
+    var fieldViews = document.getElementById("field-views");
+    var fieldSvg = document.querySelector("#field-svg svg");
+    var dotLayer = document.querySelector(".dot-layer");
+    if (!field || !stage || !controls || !fieldViews) return;
+
+    var finePointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+    var HINTS = [
+      { key: "loupe", gate: finePointer, host: stage,
+        cls: "beacon-stage", tipCls: "tip-stage",
+        eyebrow: "Under the pointer",
+        copy: "Hold the pointer still over the dots to raise a lens that " +
+              "separates the crowd and a crosshair that reads the axes.",
+        label: "Hint: the lens and the crosshair" },
+      { key: "dotkeys", gate: true, host: controls,
+        cls: "beacon-controls", tipCls: "tip-controls",
+        eyebrow: "From the keyboard",
+        copy: "Focus the dots and use the arrow keys to walk the ranking. " +
+              "Enter opens that contributor's table row.",
+        label: "Hint: walking the dots by keyboard" }
+    ];
+    var live = [];      // {h, btn, tip}
+    var openTip = null; // at most one tip at a time
+
+    function find(key) {
+      for (var i = 0; i < live.length; i++) if (live[i].h.key === key) return live[i];
+      return null;
+    }
+    function dismiss(entry) {
+      store.mark(entry.h.key);
+      if (entry.tip) entry.tip.remove();
+      entry.btn.remove();
+      if (openTip === entry) openTip = null;
+      live = live.filter(function (e) { return e !== entry; });
+    }
+    function showTip(entry) {
+      if (openTip && openTip !== entry) dismiss(openTip); // it was shown: delivered
+      var tip = el("div", "beacon-tip " + entry.h.tipCls);
+      tip.setAttribute("role", "status");
+      var eye = el("p", "beacon-tip-eyebrow");
+      eye.appendChild(el("span", null, entry.h.eyebrow));
+      var x = el("button", "beacon-tip-x", "✕");
+      x.type = "button";
+      x.setAttribute("aria-label", "Dismiss this hint");
+      x.addEventListener("click", function () { dismiss(entry); });
+      eye.appendChild(x);
+      tip.appendChild(eye);
+      tip.appendChild(el("p", null, entry.h.copy));
+      entry.h.host.appendChild(tip);
+      entry.tip = tip;
+      entry.btn.setAttribute("aria-expanded", "true");
+      openTip = entry;
+    }
+
+    function place() {
+      HINTS.forEach(function (h) {
+        if (!h.gate || store.done(h.key)) return;
+        var btn = el("button", "beacon " + h.cls);
+        btn.type = "button";
+        btn.dataset.hint = h.key;
+        btn.setAttribute("aria-label", h.label);
+        btn.setAttribute("aria-expanded", "false");
+        var entry = { h: h, btn: btn, tip: null };
+        btn.addEventListener("click", function () {
+          if (openTip === entry) dismiss(entry);
+          else showTip(entry);
+        });
+        if (h.key === "dotkeys") controls.insertBefore(btn, fieldViews.nextSibling);
+        else h.host.appendChild(btn);
+        live.push(entry);
+      });
+      if (!live.length) return;
+
+      // "already using it" latches retire a hint without it ever opening
+      if (fieldSvg && finePointer) {
+        var dwell = null;
+        fieldSvg.addEventListener("pointerenter", function (ev) {
+          if (ev.pointerType === "touch" || !find("loupe")) return;
+          dwell = setTimeout(function () {
+            var e = find("loupe");
+            // not while its tip is being read — the tip overlays the stage
+            if (e && openTip !== e) dismiss(e);
+          }, 1800);
+        });
+        fieldSvg.addEventListener("pointerleave", function () {
+          if (dwell) { clearTimeout(dwell); dwell = null; }
+        });
+      }
+      if (dotLayer) {
+        dotLayer.addEventListener("focusin", function () {
+          var e = find("dotkeys");
+          if (e) dismiss(e);
+        });
+      }
+      document.addEventListener("click", function (ev) {
+        if (!openTip) return;
+        if (openTip.tip.contains(ev.target) || openTip.btn.contains(ev.target)) return;
+        dismiss(openTip);
+      });
+    }
+
+    hintTipClose = function () {
+      if (!openTip) return false;
+      dismiss(openTip);
+      return true;
+    };
+
+    // beacons appear only once the field card is actually on screen (no
+    // public hook exists: the bloom IO is private and #field carries no
+    // data-reveal, so this module runs its own one-shot observer)
+    if (reducedMotion || !("IntersectionObserver" in window)) {
+      place();
+    } else {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (!e.isIntersecting) return;
+          io.disconnect();
+          place();
+        });
+      }, { threshold: 0.25 });
+      io.observe(field);
+    }
+  })();
+
+  /* ------------------------------------------------------ shortcuts legend
+     Same surface mechanics as the palette (scrim, top-third card, single-
+     modal policy, shared body lock — safe because only one of the two can
+     ever be open). Static repo-agnostic content lives in the template. */
+  (function legend() {
+    var root = document.getElementById("legend");
+    var backdrop = document.getElementById("legend-backdrop");
+    var closeBtn = document.getElementById("legend-close");
+    if (!root || !backdrop || !closeBtn) return;
+
+    var isOpen = false;
+    var lastFocus = null;
+    var kEl = document.getElementById("legend-k");
+    if (kEl) kEl.textContent = isMac ? "⌘K" : "Ctrl K";
+    var xk = document.getElementById("explore-k");
+    if (xk) xk.textContent = isMac ? "⌘K" : "Ctrl K";
+
+    function trap(ev) {
+      // one focusable control in the dialog: Tab has nowhere honest to go
+      if (ev.key !== "Tab") return;
+      ev.preventDefault();
+      closeBtn.focus();
+    }
+    function openLg(invoker) {
+      if (isOpen) return;
+      if (paletteClose) paletteClose(); // single-modal policy: never stacked
+      if (compareClose) compareClose();
+      isOpen = true;
+      lastFocus = invoker || document.activeElement;
+      root.hidden = false;
+      document.body.classList.add("palette-lock");
+      tipHide();
+      closeBtn.focus();
+      root.addEventListener("keydown", trap);
+    }
+    function closeLg() {
+      if (!isOpen) return false;
+      isOpen = false;
+      root.hidden = true;
+      root.removeEventListener("keydown", trap);
+      document.body.classList.remove("palette-lock");
+      if (lastFocus && lastFocus.focus) lastFocus.focus();
+      lastFocus = null;
+      return true;
+    }
+
+    backdrop.addEventListener("click", function () { closeLg(); });
+    closeBtn.addEventListener("click", function () { closeLg(); });
+
+    var foot = document.getElementById("foot-shortcuts");
+    if (foot) {
+      foot.hidden = false; // dead without JS, so the template ships it hidden
+      foot.addEventListener("click", function () { openLg(foot); });
+    }
+
+    legendOpen = openLg;
+    legendClose = closeLg;
+  })();
+
   /* ------------------------------------------------------- global keyboard */
   var eggBuf = "";
   document.addEventListener("keydown", function (ev) {
+    // Cmd/Ctrl+K toggles the command palette — before everything else, and
+    // even while typing (the standard palette contract). Shift/Alt combos
+    // stay with the browser (Ctrl+Shift+K is Firefox's console).
+    if ((ev.metaKey || ev.ctrlKey) && !ev.altKey && !ev.shiftKey &&
+        (ev.key === "k" || ev.key === "K")) {
+      if (paletteToggle) { ev.preventDefault(); paletteToggle(); }
+      return;
+    }
     var typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
     // easter egg: type "gravity" anywhere outside a text field
     if (!typing && ev.key && ev.key.length === 1) {
@@ -2642,8 +3109,14 @@
     if (ev.key === "/" && !typing) {
       ev.preventDefault();
       search.focus();
+    } else if (ev.key === "?" && !typing) {
+      ev.preventDefault();
+      if (legendOpen) legendOpen();
     } else if (ev.key === "Escape") {
-      if (compareClose && compareClose()) { return; } // modal first
+      if (paletteClose && paletteClose()) { return; } // topmost surfaces first
+      if (legendClose && legendClose()) { return; }
+      if (compareClose && compareClose()) { return; } // modal next
+      if (hintTipClose && hintTipClose()) { return; } // then a floating hint tip
       if (fieldGravity && fieldGravity.isOn()) { fieldGravity.off(); tipHide(); return; }
       if (typing && search.value) {
         search.value = ""; state.query = ""; render();

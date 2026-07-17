@@ -6,7 +6,8 @@ so the same script verifies any deployment (FastVideo, ComfyUI, future repos).
 Checks per engine (chromium, webkit, firefox) x (normal, reduced-motion):
 hero-first layout, the guess beat plays and claims the measured correlation,
 the org-lens section renders with the sim's real numbers, the curated compare
-deep link opens the dialog, and the page throws zero errors.
+deep link opens the dialog, the Ctrl/Cmd+K palette opens/jumps/closes with the
+Escape cascade intact, and the page throws zero errors.
 
 Assertion style matters (hard-won): computed visibility, never the `hidden`
 attribute; `offsetParent` is null for position:fixed elements.
@@ -45,6 +46,9 @@ def main() -> None:
     rho = f"{payload['meta']['rho']:.2f}"
     top_risk = max(payload["org"]["risk"].items(), key=lambda kv: kv[1]["files"])
     top_name, top = top_risk
+    # a payload-derived contributor for the palette scenario (not rank 1, so a
+    # working jump can't be confused with a default state)
+    pal_author = payload["authors"][min(2, len(payload["authors"]) - 1)]["name"]
 
     fails: list[str] = []
     with sync_playwright() as p:
@@ -101,6 +105,78 @@ def main() -> None:
                 if not pg.eval_on_selector("#compare", VIS):
                     fails.append(f"[{tag}] compare deep link failed")
                 pg.keyboard.press("Escape")
+
+                # command palette: Ctrl+K opens, a typed contributor jumps to
+                # their open detail row, Escape closes the palette itself
+                # (cascade order: the compare modal must stay untouched)
+                pg.keyboard.press("Control+k")
+                pg.wait_for_timeout(250)
+                if not pg.eval_on_selector("#palette", VIS):
+                    fails.append(f"[{tag}] palette did not open on Ctrl+K")
+                else:
+                    if not pg.eval_on_selector("#nav-kbd", VIS):
+                        fails.append(f"[{tag}] nav palette affordance hidden")
+                    pg.fill("#palette-input", pal_author)
+                    pg.wait_for_timeout(150)
+                    pg.keyboard.press("Enter")
+                    pg.wait_for_timeout(500)
+                    if pg.eval_on_selector("#palette", VIS):
+                        fails.append(f"[{tag}] palette still open after Enter")
+                    row_btn = f'tr.row[data-name="{pal_author}"] .row-btn'
+                    if pg.eval_on_selector(
+                        row_btn, "el=>el.getAttribute('aria-expanded')"
+                    ) != "true":
+                        fails.append(f"[{tag}] palette jump left detail closed")
+                    pg.keyboard.press("Control+k")
+                    pg.wait_for_timeout(250)
+                    pg.keyboard.press("Escape")
+                    pg.wait_for_timeout(150)
+                    if pg.eval_on_selector("#palette", VIS):
+                        fails.append(f"[{tag}] Escape did not close the palette")
+                    if pg.eval_on_selector("#compare", VIS):
+                        fails.append(f"[{tag}] Escape leaked past the palette")
+
+                # shortcuts legend: ? opens, Escape closes
+                pg.keyboard.press("?")
+                pg.wait_for_timeout(250)
+                if not pg.eval_on_selector("#legend", VIS):
+                    fails.append(f"[{tag}] legend did not open on ?")
+                pg.keyboard.press("Escape")
+                pg.wait_for_timeout(150)
+                if pg.eval_on_selector("#legend", VIS):
+                    fails.append(f"[{tag}] Escape did not close the legend")
+
+                # hint beacons: appear once the field is on screen; the tip
+                # opens on click and its ✕ removes the beacon for good
+                pg.eval_on_selector(
+                    "#field", "el=>el.scrollIntoView({behavior:'instant',block:'center'})"
+                )
+                pg.wait_for_timeout(600)
+                beacon = '[data-hint="dotkeys"]'
+                if not pg.query_selector(beacon):
+                    fails.append(f"[{tag}] dotkeys beacon absent")
+                else:
+                    pg.click(beacon)
+                    pg.wait_for_timeout(200)
+                    if not pg.eval_on_selector(".beacon-tip", VIS):
+                        fails.append(f"[{tag}] beacon tip did not open")
+                    pg.click(".beacon-tip-x")
+                    pg.wait_for_timeout(150)
+                    if pg.query_selector(beacon):
+                        fails.append(f"[{tag}] dismissed beacon still present")
+                    elif engine == "chromium":
+                        # persistence asserted on chromium only: webkit and
+                        # firefox deny storage on file:// and fall back to
+                        # the in-memory latch (hints return per load there)
+                        pg.reload()
+                        pg.wait_for_timeout(600)
+                        pg.eval_on_selector(
+                            "#field",
+                            "el=>el.scrollIntoView({behavior:'instant',block:'center'})",
+                        )
+                        pg.wait_for_timeout(600)
+                        if pg.query_selector(beacon):
+                            fails.append(f"[{tag}] beacon returned after reload")
 
                 if errs:
                     fails.append(f"[{tag}] page errors: {errs}")

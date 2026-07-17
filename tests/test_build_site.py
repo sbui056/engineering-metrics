@@ -466,3 +466,34 @@ def test_rendered_page_field_and_links():
     assert 'id="contrast"' not in page          # old scatter section removed
     assert "spectrum-strip" not in page         # old tick strip removed
     assert 'id="field"' in page
+
+
+def test_rendered_page_command_palette():
+    page = render_html(build_payload(_frames()))
+    # the surface ships closed and JS-only: root and nav affordance both hidden
+    assert '<div id="palette" class="palette" hidden>' in page
+    assert 'id="nav-kbd" hidden' in page
+    # ARIA 1.2 combobox: role on the input, listbox as the popup
+    assert 'role="combobox"' in page
+    assert 'role="listbox"' in page
+    # the [hidden] trap (recurred 3x): display:flex needs the explicit rule
+    assert ".palette[hidden] { display: none; }" in page
+    # palette never prints
+    assert ".palette," in page.split("@media print", 1)[1].split("}", 1)[0]
+
+
+def test_rendered_page_legend_and_hints():
+    page = render_html(build_payload(_frames()))
+    # legend ships closed; footer link is dead without JS so it ships hidden
+    assert '<div id="legend" class="legend" hidden role="dialog"' in page
+    assert 'id="foot-shortcuts" class="foot-shortcuts" hidden' in page
+    # the [hidden] trap: both new flex/absolute surfaces carry explicit rules
+    assert ".legend[hidden] { display: none; }" in page
+    assert ".beacon-tip[hidden] { display: none; }" in page
+    # none of the discoverability layer prints
+    print_head = page.split("@media print", 1)[1].split("}", 1)[0]
+    for cls in (".legend", ".beacon", ".beacon-tip", ".foot-shortcuts"):
+        assert cls in print_head, f"{cls} missing from the print hide list"
+    # the gravity easter egg stays fully secret (user decision)
+    legend_html = page.split('id="legend"', 1)[1].split("</dl>", 1)[0]
+    assert "gravity" not in legend_html.lower()

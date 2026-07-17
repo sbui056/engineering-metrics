@@ -313,6 +313,18 @@ html.js [data-reveal].in-fast { transition-duration: 0.18s; transition-delay: 0m
 }
 .nav-pill:hover { background: #000; transform: translateY(-1px); }
 .nav-pill:active { transform: translateY(0) scale(0.98); }
+/* command-palette affordance (unhidden by JS, which also sets ⌘K vs Ctrl K) */
+.nav-kbd {
+  all: unset; box-sizing: border-box; cursor: pointer; flex-shrink: 0;
+  font: 400 0.6875rem var(--mono); color: var(--ink-3);
+  border: 1px solid var(--hair-2); border-radius: 6px;
+  background: var(--cream); padding: 0.25rem 0.5rem;
+  transition: color var(--swift), border-color var(--swift), transform var(--swift);
+}
+.nav-kbd:hover { color: var(--ink); border-color: var(--ink-3); }
+.nav-kbd:active { transform: scale(0.96); }
+.nav-kbd:focus-visible { outline: 2px solid var(--verm); outline-offset: 2px; }
+.nav-kbd[hidden] { display: none; }
 
 /* ------------------------------------------------------------------ hero */
 .hero { position: relative; overflow: hidden; }
@@ -477,6 +489,7 @@ html.js .in .strike path, html.js .strike.drawn path { stroke-dashoffset: 0; }
 .odo-static { display: inline-block; vertical-align: bottom; line-height: 1; }
 
 .field-controls {
+  position: relative; /* anchors the keyboard-hint beacon tip (.tip-controls) */
   display: flex; align-items: center; flex-wrap: wrap;
   gap: 0.5rem 0.9rem; margin-bottom: 0.9rem;
 }
@@ -950,6 +963,152 @@ body.compare-lock { overflow: hidden; }
   .compare-tray { flex-wrap: wrap; border-radius: var(--r-lg); }
 }
 
+/* --------------------------------------------------------- command palette
+   centered top-third modal over a scrim (compare-modal mechanics at a higher
+   layer: tooltip and compare share z-60, the palette must clear both) */
+body.palette-lock { overflow: hidden; }
+.palette {
+  position: fixed; inset: 0; z-index: 80;
+  display: flex; justify-content: center; align-items: flex-start;
+  padding: 16vh 1.5rem 1.5rem;
+}
+.palette[hidden] { display: none; } /* display:flex must not defeat [hidden] */
+.palette-backdrop {
+  position: absolute; inset: 0; background: rgba(26, 21, 18, 0.42);
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  animation: compare-fade 0.25s var(--ease-expo);
+}
+.palette-card {
+  position: relative; width: min(34rem, 100%); max-height: min(24rem, 68vh);
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--card); border-radius: var(--r-xl);
+  box-shadow: var(--card-shadow);
+  animation: palette-rise 0.22s var(--ease-expo);
+}
+@keyframes palette-rise {
+  from { opacity: 0; transform: translateY(6px) scale(0.99); }
+  to { opacity: 1; transform: none; }
+}
+#palette-input {
+  width: 100%; border: 0; border-bottom: 1px solid var(--hair);
+  background: transparent; color: var(--ink);
+  font: 400 1rem var(--ui); padding: 1rem 1.15rem;
+}
+#palette-input:focus { outline: none; }
+#palette-input::placeholder { color: var(--ink-3); }
+#palette-list {
+  list-style: none; margin: 0; padding: 0.4rem; overflow-y: auto; flex: 1;
+  overscroll-behavior: contain;
+}
+.palette-group {
+  font: 500 0.625rem var(--mono); text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--ink-3); padding: 0.55rem 0.75rem 0.25rem;
+}
+.palette-opt {
+  display: flex; align-items: center; gap: 0.65rem;
+  padding: 0.5rem 0.75rem; border-radius: var(--r-md); cursor: pointer;
+  border-left: 2px solid transparent;
+}
+.palette-opt[aria-selected="true"] { background: var(--peach); border-left-color: var(--verm); }
+.palette-opt .monogram { width: 24px; height: 24px; font-size: 0.625rem; margin-right: 0; }
+.palette-opt-label {
+  flex: 1; min-width: 0; font-size: 0.875rem; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.palette-opt-meta { font: 400 0.6875rem var(--mono); color: var(--ink-3); white-space: nowrap; }
+.palette-empty { margin: 0; padding: 0.9rem 1.15rem 1.1rem; font-size: 0.875rem; color: var(--ink-3); }
+.palette-empty[hidden] { display: none; }
+
+/* --------------------------------------------------------- shortcuts legend
+   same surface mechanics as the palette (scrim, top-third card, z-80) */
+.legend {
+  position: fixed; inset: 0; z-index: 80;
+  display: flex; justify-content: center; align-items: flex-start;
+  padding: 16vh 1.5rem 1.5rem;
+}
+.legend[hidden] { display: none; } /* display:flex must not defeat [hidden] */
+.legend-backdrop {
+  position: absolute; inset: 0; background: rgba(26, 21, 18, 0.42);
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  animation: compare-fade 0.25s var(--ease-expo);
+}
+.legend-card {
+  position: relative; width: min(26rem, 100%);
+  background: var(--card); border-radius: var(--r-xl); box-shadow: var(--card-shadow);
+  padding: 1.3rem 1.5rem 1.5rem; animation: palette-rise 0.22s var(--ease-expo);
+}
+.legend-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 1rem; margin-bottom: 1rem;
+}
+.legend-head h2 { font: 600 1.05rem var(--display); color: var(--ink); }
+.legend-list { margin: 0; display: grid; gap: 0.6rem; }
+.legend-row { display: flex; align-items: baseline; gap: 0.8rem; }
+.legend-row dt { min-width: 7rem; display: flex; gap: 0.25rem; flex-shrink: 0; }
+.legend-row dd { margin: 0; font-size: 0.875rem; color: var(--ink-2); }
+.legend kbd, .explore-note kbd {
+  font: 400 0.6875rem var(--mono); color: var(--ink-3);
+  border: 1px solid var(--hair-2); border-radius: 5px; padding: 0.05rem 0.35rem;
+  background: var(--cream);
+}
+/* the footer's mouse-visible path to the legend (unhidden by JS) */
+.foot-shortcuts {
+  all: unset; box-sizing: border-box; cursor: pointer;
+  font: 400 0.75rem var(--mono); color: inherit;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.foot-shortcuts:hover { color: #fff; }
+.foot-shortcuts:focus-visible { outline: 2px solid var(--cream); outline-offset: 2px; }
+.foot-shortcuts[hidden] { display: none; }
+
+/* ------------------------------------------------------------ hint beacons
+   two one-shot pulse dots on the field card; the pulse runs a finite count
+   (then rests as a quiet dot) and only under no-preference, so idle cost
+   returns to zero and reduced motion gets a static, still-functional dot */
+.beacon {
+  all: unset; box-sizing: border-box; cursor: pointer;
+  width: 24px; height: 24px; border-radius: 50%; position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.beacon::before {
+  content: ""; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--verm);
+}
+.beacon:focus-visible { outline: 2px solid var(--verm); outline-offset: 2px; }
+/* top-left: the one stage corner with no persistent content in any view
+   (the rank callouts own the top-right, the axis ticks the bottom edge) */
+.beacon-stage { position: absolute; top: 8px; left: 8px; z-index: 3; }
+@media (prefers-reduced-motion: no-preference) {
+  .beacon::after {
+    content: ""; position: absolute; inset: 2px; border-radius: 50%;
+    border: 2px solid var(--verm); opacity: 0;
+    animation: beacon-pulse 2.2s var(--ease) 5;
+  }
+}
+@keyframes beacon-pulse {
+  0% { transform: scale(0.55); opacity: 0.9; }
+  70%, 100% { transform: scale(1.5); opacity: 0; }
+}
+.beacon-tip {
+  position: absolute; z-index: 4; width: max-content; max-width: 16rem;
+  background: var(--card); border: 1px solid var(--hair);
+  border-radius: var(--r-lg); box-shadow: var(--card-shadow);
+  padding: 0.7rem 0.85rem 0.8rem;
+}
+.beacon-tip[hidden] { display: none; }
+.tip-stage { top: 38px; left: 8px; }   /* opens inward — the stage clips at its edge */
+.tip-controls { top: calc(100% + 6px); left: 0; }
+.beacon-tip-eyebrow {
+  display: flex; justify-content: space-between; gap: 0.6rem;
+  font: 500 0.625rem var(--mono); text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--ink-3); margin: 0 0 0.3rem;
+}
+.beacon-tip p { margin: 0; font-size: 0.8125rem; color: var(--ink-2); line-height: 1.5; }
+.beacon-tip-x { all: unset; cursor: pointer; color: var(--ink-3); padding: 0 0.2rem; }
+.beacon-tip-x:hover { color: var(--ink); }
+.beacon-tip-x:focus-visible { outline: 2px solid var(--verm); }
+
 td.num { font: 400 0.8125rem var(--mono); color: var(--ink-3); width: 3.2rem; white-space: nowrap; }
 td.name-cell { color: var(--ink); font-weight: 500; white-space: nowrap; }
 /* the row's disclosure control: reads as plain text, focuses as a button */
@@ -1269,6 +1428,17 @@ tr.detail.open .detail-clip { grid-template-rows: 1fr; }
   .detail-body { grid-template-columns: 1fr; gap: 1.5rem; }
   .method-grid { grid-template-columns: 1fr; gap: 1.5rem; }
 }
+/* the secondary nav trio (cross-links + ⌘K) fits only with the full-width
+   nav: measured clean at 993px+ with wordmark, four links, both cross-links,
+   the kbd affordance, and the repo pill all visible; at 721-992px the row
+   overflowed the page (126-240px, a live defect this fixes). Below 62rem the
+   trio yields before anything wraps — the footer line carries the essay, the
+   README the siblings, and Cmd/Ctrl+K still works without its pill. */
+@media (max-width: 62rem) {
+  .nav-sib-wrap { display: none; }
+  .nav-essay { display: none; }
+  .nav-kbd { display: none; }
+}
 @media (max-width: 45rem) {
   .board th.w-sig, .board td.sig { display: none; }
   .nav-inner { padding: 0 1rem; }
@@ -1277,13 +1447,16 @@ tr.detail.open .detail-clip { grid-template-rows: 1fr; }
   .nav-links a { padding: 0.35rem 0.4rem; font-size: 0.8125rem; }
   /* four links + pill fit 390px: tighter pill, never two lines */
   .nav-pill { padding: 0.4rem 0.75rem; white-space: nowrap; }
-  .nav-sib-wrap { display: none; } /* cross-links live in the README on phones */
-  .nav-essay { display: none; }    /* the footer line carries the essay on phones */
 }
 @media (max-width: 24rem) {
   /* small Androids: the pill duplicates the hero announce + footer repo
      links, so it yields before the section links do */
   .nav-pill { display: none; }
+  /* two measured 320px page-overflow sources: the four field view tabs
+     (299px of seg at 0.85rem button padding) and the leaderboard intro's
+     nowrap compare link carrying two data-derived names */
+  .seg button { padding: 0.42rem 0.55rem; }
+  .pointer-link { white-space: normal; }
   .hero-inner { padding-top: 3rem; }
   h1 { font-size: clamp(2.3rem, 9.5vw, 3rem); }
   .hero-ctas { flex-wrap: wrap; }
@@ -1302,7 +1475,8 @@ tr.detail.open .detail-clip { grid-template-rows: 1fr; }
   .nav, .hero-ctas, .announce, .field-controls, .table-tools, .board-foot,
   .skip, .tooltip, .hero-arcs, .espresso-arcs, .scroll-progress,
   .crosshair, .proxy-dot, .mixer, .prologue,
-  .compare-tray, .compare-modal, .row-compare,
+  .compare-tray, .compare-modal, .row-compare, .palette,
+  .legend, .beacon, .beacon-tip, .foot-shortcuts,
   .sim-head, .sim-back { display: none !important; } /* org section prints; its controls don't */
   body { background: #fff; color: #000; }
   body::before { display: none; }

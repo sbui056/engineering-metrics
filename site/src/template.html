@@ -35,6 +35,8 @@
       <!--@INJECT:SIBLINGS-->
       <!--@INJECT:ESSAYLINK-->
     </div>
+    <button type="button" class="nav-kbd" id="nav-kbd" hidden
+            aria-label="Open the command palette">⌘K</button>
     <a class="nav-pill" href="<!--@INJECT:REPOURL-->" target="_blank" rel="noopener noreferrer"><!--@INJECT:REPO--> ↗</a>
   </div>
 </nav>
@@ -124,7 +126,8 @@
           Within a tier, order means nothing.</p>
       </div>
       <p class="explore-note" id="explore-note" hidden>Take the controls — hover any dot,
-        <span class="nowrap">click to jump to its row.</span></p>
+        <span class="nowrap">click to jump to its row.</span>
+        Press <kbd>?</kbd> for shortcuts, or <kbd id="explore-k">⌘K</kbd> to jump anywhere.</p>
     </aside>
 
     <figure class="card field" id="field"
@@ -350,6 +353,7 @@
     <div class="espresso-meta">
       <span>impact/<!--@INJECT:REPOSLUG--></span>
       <span id="footer-meta"><!--@INJECT:FOOTER--></span>
+      <button type="button" id="foot-shortcuts" class="foot-shortcuts" hidden>shortcuts</button>
     </div>
   </div>
 </footer>
@@ -370,6 +374,42 @@
       <button type="button" id="compare-close" class="compare-close" aria-label="Close comparison">✕</button>
     </div>
     <div class="compare-body" id="compare-body"></div>
+  </div>
+</div>
+
+<!-- command palette: Cmd/Ctrl+K jump-anywhere, populated by app.js (palette
+     module); hidden without JS. ARIA 1.2 combobox — focus stays on the input,
+     aria-activedescendant tracks the highlighted option. -->
+<div id="palette" class="palette" hidden>
+  <div class="palette-backdrop" id="palette-backdrop"></div>
+  <div class="palette-card">
+    <input id="palette-input" type="text" autocomplete="off" spellcheck="false"
+           placeholder="Jump to a section, contributor, or action…"
+           role="combobox" aria-expanded="true" aria-controls="palette-list"
+           aria-autocomplete="list" aria-label="Command palette">
+    <ul id="palette-list" role="listbox" aria-label="Palette results"></ul>
+    <p class="palette-empty" id="palette-empty" hidden>No matches. Try a name or a section.</p>
+  </div>
+</div>
+
+<!-- shortcuts legend: opened with ?, the palette, or the footer link; hidden
+     without JS. The ⌘K glyph is swapped to Ctrl K on non-Mac platforms. -->
+<div id="legend" class="legend" hidden role="dialog" aria-modal="true"
+     aria-labelledby="legend-title">
+  <div class="legend-backdrop" id="legend-backdrop"></div>
+  <div class="legend-card">
+    <div class="legend-head">
+      <h2 id="legend-title">Keyboard shortcuts</h2>
+      <button type="button" id="legend-close" class="compare-close" aria-label="Close shortcuts">✕</button>
+    </div>
+    <dl class="legend-list">
+      <div class="legend-row"><dt><kbd>/</kbd></dt><dd>focus the contributor filter</dd></div>
+      <div class="legend-row"><dt><kbd id="legend-k">⌘K</kbd></dt><dd>open the command palette</dd></div>
+      <div class="legend-row"><dt><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></dt><dd>walk the dots by rank</dd></div>
+      <div class="legend-row"><dt><kbd>Enter</kbd></dt><dd>open the focused dot's table row</dd></div>
+      <div class="legend-row"><dt><kbd>Esc</kbd></dt><dd>close or back out, one layer at a time</dd></div>
+      <div class="legend-row"><dt><kbd>?</kbd></dt><dd>this legend</dd></div>
+    </dl>
   </div>
 </div>
 
