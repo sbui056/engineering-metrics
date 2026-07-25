@@ -67,6 +67,6 @@ in the method — they are the finding.
 
 Both pages carry the same limits, and they matter differently per shape: on FastVideo,
 review leverage is a real differentiator among the core; on ComfyUI — where the maintainer
-lands most work by direct push — 126 of 311 contributors have ever given a review, and the
-185-person zero-review block is literally visible as the tallest column in the spectrum. Blame still only sees surviving lines; concentration still reads as both mastery
+lands most work by direct push — 52 of 311 contributors have ever given a review, and the
+259-person zero-review block is literally visible as the tallest column in the spectrum. Blame still only sees surviving lines; concentration still reads as both mastery
 and fragility. Signals, not verdicts — on any repo.

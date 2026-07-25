@@ -3,6 +3,12 @@
 **Ranking FastVideo's contributors by impact instead of activity — results, the baselines we
 rejected, and what the numbers can and cannot say.**
 
+*Numbers as of the 2026-07-03 analysis, when 82 contributors were scored. The
+[live dashboard](https://sbui056.github.io/engineering-metrics/) refreshes weekly and has already
+drifted from this snapshot: contributors join, ranks move, and percentile scores are relative to
+whoever is in the population that week. The reasoning below, and the design decisions it defends,
+are what this document is for. For current figures, read the dashboard.*
+
 This is the results writeup. The mechanics — signal definitions, data contract, scoring math —
 live in [methodology.md](methodology.md); this document covers what came out the other end and why
 the design choices were made the way they were.
